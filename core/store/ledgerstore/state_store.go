@@ -27,10 +27,10 @@ import (
 	"github.com/ontio/ontology/core/payload"
 	"github.com/ontio/ontology/core/states"
 	scom "github.com/ontio/ontology/core/store/common"
-	"github.com/ontio/ontology/core/store/leveldbstore"
 	"github.com/ontio/ontology/core/store/statestore"
 	"github.com/ontio/ontology/merkle"
-	"github.com/syndtr/goleveldb/leveldb"
+
+	"github.com/ont-project/ontology-framework/core"
 )
 
 var (
@@ -40,23 +40,24 @@ var (
 
 //StateStore saving the data of ledger states. Like balance of account, and the execution result of smart contract
 type StateStore struct {
-	dbDir           string                    //Store file path
-	store           scom.PersistStore         //Store handler
+	//dbDir           string                    //Store file path
+	//store           scom.PersistStore         //Store handler
+	store           core.Storage
 	merklePath      string                    //Merkle tree store path
 	merkleTree      *merkle.CompactMerkleTree //Merkle tree of block root
 	merkleHashStore merkle.HashStore
 }
 
 //NewStateStore return state store instance
-func NewStateStore(dbDir, merklePath string) (*StateStore, error) {
+func NewStateStore(storageState core.Storage, merklePath string) (*StateStore, error) {
 	var err error
-	store, err := leveldbstore.NewLevelDBStore(dbDir)
-	if err != nil {
-		return nil, err
-	}
+	//store, err := leveldbstore.NewLevelDBStore(dbDir)
+	//if err != nil {
+	//	return nil, err
+	//}
 	stateStore := &StateStore{
-		dbDir:      dbDir,
-		store:      store,
+		//dbDir:      dbDir,
+		store:      storageState,
 		merklePath: merklePath,
 	}
 	_, height, err := stateStore.GetCurrentBlock()
@@ -96,7 +97,7 @@ func (self *StateStore) GetMerkleTree() (uint32, []common.Uint256, error) {
 	key := self.getMerkleTreeKey()
 	data, err := self.store.Get(key)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if err == core.ErrNotFound {
 			return 0, nil, nil
 		}
 		return 0, nil, err
@@ -169,7 +170,7 @@ func (self *StateStore) GetContractState(contractHash common.Address) (*payload.
 
 	value, err := self.store.Get(key)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if err == core.ErrNotFound {
 			return nil, nil
 		}
 		return nil, err
@@ -192,7 +193,7 @@ func (self *StateStore) GetBookkeeperState() (*states.BookkeeperState, error) {
 
 	value, err := self.store.Get(key)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if err == core.ErrNotFound {
 			return nil, nil
 		}
 		return nil, err
@@ -230,7 +231,7 @@ func (self *StateStore) GetStorageState(key *states.StorageKey) (*states.Storage
 
 	data, err := self.store.Get(storeKey)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if err == core.ErrNotFound {
 			return nil, nil
 		}
 		return nil, err
@@ -247,7 +248,10 @@ func (self *StateStore) GetStorageState(key *states.StorageKey) (*states.Storage
 //GetVoteStates return vote states
 func (self *StateStore) GetVoteStates() (map[common.Address]*states.VoteState, error) {
 	votes := make(map[common.Address]*states.VoteState)
-	iter := self.store.NewIterator([]byte{byte(scom.ST_VOTE)})
+	iter, err := self.store.NewIterator([]byte{byte(scom.ST_VOTE)})
+	if err != nil {
+		return nil, err
+	}
 	defer iter.Release()
 	for iter.Next() {
 		rk := bytes.NewReader(iter.Key())
@@ -275,7 +279,7 @@ func (self *StateStore) GetCurrentBlock() (common.Uint256, uint32, error) {
 	key := self.getCurrentBlockKey()
 	data, err := self.store.Get(key)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if err == core.ErrNotFound {
 			return common.Uint256{}, 0, nil
 		}
 		return common.Uint256{}, 0, err
@@ -341,7 +345,10 @@ func (self *StateStore) getMerkleTreeKey() []byte {
 //ClearAll clear all data in state store
 func (self *StateStore) ClearAll() error {
 	self.store.NewBatch()
-	iter := self.store.NewIterator(nil)
+	iter, err := self.store.NewIterator(nil)
+	if err != nil {
+		return err
+	}
 	for iter.Next() {
 		self.store.BatchDelete(iter.Key())
 	}

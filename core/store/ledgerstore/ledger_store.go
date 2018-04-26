@@ -40,6 +40,8 @@ import (
 	"github.com/ontio/ontology/smartcontract/event"
 	"github.com/ontio/ontology/smartcontract/storage"
 	vmtype "github.com/ontio/ontology/smartcontract/types"
+
+	"github.com/ont-project/ontology-framework/core"
 )
 
 const (
@@ -80,7 +82,7 @@ type LedgerStoreImp struct {
 }
 
 //NewLedgerStore return LedgerStoreImp instance
-func NewLedgerStore() (*LedgerStoreImp, error) {
+func NewLedgerStore(storageBlock, storageEvent, storageState core.Storage) (*LedgerStoreImp, error) {
 	ledgerStore := &LedgerStoreImp{
 		exitCh:      make(chan interface{}, 0),
 		headerIndex: make(map[uint32]common.Uint256),
@@ -88,19 +90,19 @@ func NewLedgerStore() (*LedgerStoreImp, error) {
 		blockCache:  make(map[common.Uint256]*ledgerCacheItem),
 	}
 
-	blockStore, err := NewBlockStore(DBDirBlock, true)
+	blockStore, err := NewBlockStore(storageBlock, true)
 	if err != nil {
 		return nil, fmt.Errorf("NewBlockStore error %s", err)
 	}
 	ledgerStore.blockStore = blockStore
 
-	stateStore, err := NewStateStore(DBDirState, MerkleTreeStorePath)
+	stateStore, err := NewStateStore(storageState, MerkleTreeStorePath)
 	if err != nil {
 		return nil, fmt.Errorf("NewStateStore error %s", err)
 	}
 	ledgerStore.stateStore = stateStore
 
-	eventState, err := NewEventStore(DBDirEvent)
+	eventState, err := NewEventStore(storageEvent)
 	if err != nil {
 		return nil, fmt.Errorf("NewEventStore error %s", err)
 	}

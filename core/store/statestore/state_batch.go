@@ -25,17 +25,19 @@ import (
 	"github.com/ontio/ontology/core/payload"
 	"github.com/ontio/ontology/core/states"
 	"github.com/ontio/ontology/core/store/common"
-	"github.com/syndtr/goleveldb/leveldb"
 	"strings"
 	"github.com/ontio/ontology/errors"
+
+	"github.com/ont-project/ontology-framework/core"
 )
 
 type StateBatch struct {
-	store       common.PersistStore
+	//store       common.PersistStore
+	store       core.Storage
 	memoryStore common.MemoryCacheStore
 }
 
-func NewStateStoreBatch(memoryStore common.MemoryCacheStore, store common.PersistStore) *StateBatch {
+func NewStateStoreBatch(memoryStore common.MemoryCacheStore, store core.Storage) *StateBatch {
 	return &StateBatch{
 		store:       store,
 		memoryStore: memoryStore,
@@ -45,7 +47,10 @@ func NewStateStoreBatch(memoryStore common.MemoryCacheStore, store common.Persis
 func (self *StateBatch) Find(prefix common.DataEntryPrefix, key []byte) ([]*common.StateItem, error) {
 	var sts []*common.StateItem
 	bp := []byte{byte(prefix)}
-	iter := self.store.NewIterator(append(bp, key...))
+	iter, err := self.store.NewIterator(append(bp, key...))
+	if err != nil {
+		return nil, err
+	}
 	defer iter.Release()
 	for iter.Next() {
 		key := iter.Key()
@@ -84,7 +89,7 @@ func (self *StateBatch) TryGetOrAdd(prefix common.DataEntryPrefix, key []byte, v
 		return nil
 	}
 	item, err := self.store.Get(append(aPrefix, key...))
-	if err != nil && err != leveldb.ErrNotFound {
+	if err != nil && err != core.ErrNotFound {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[TryGetOrAdd], leveldb store get data failed.")
 	}
 
@@ -109,7 +114,7 @@ func (self *StateBatch) TryGet(prefix common.DataEntryPrefix, key []byte) (*comm
 	}
 	enc, err := self.store.Get(pk)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if err == core.ErrNotFound {
 			return nil, nil
 		}
 		return nil, errors.NewDetailErr(err, errors.ErrNoCode, "[TryGet], leveldb store get data failed.")

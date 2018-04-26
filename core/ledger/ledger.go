@@ -31,6 +31,8 @@ import (
 	"github.com/ontio/ontology/core/store/ledgerstore"
 	"github.com/ontio/ontology/core/types"
 	"github.com/ontio/ontology/smartcontract/event"
+
+	"github.com/ont-project/ontology-framework/core"
 )
 
 var DefLedger *Ledger
@@ -39,8 +41,8 @@ type Ledger struct {
 	ldgStore store.LedgerStore
 }
 
-func NewLedger() (*Ledger, error) {
-	ldgStore, err := ledgerstore.NewLedgerStore()
+func NewLedger(storageBlock, storageEvent, storageState core.Storage) (*Ledger, error) {
+	ldgStore, err := ledgerstore.NewLedgerStore(storageBlock, storageEvent, storageState)
 	if err != nil {
 		return nil, fmt.Errorf("NewLedgerStore error %s", err)
 	}
