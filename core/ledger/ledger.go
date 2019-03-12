@@ -20,19 +20,16 @@ package ledger
 
 import (
 	"fmt"
-
 	"github.com/ontio/ontology-crypto/keypair"
 	"github.com/ontio/ontology/common"
 	"github.com/ontio/ontology/common/log"
-	"github.com/ontio/ontology/core/genesis"
 	"github.com/ontio/ontology/core/payload"
 	"github.com/ontio/ontology/core/states"
 	"github.com/ontio/ontology/core/store"
 	"github.com/ontio/ontology/core/store/ledgerstore"
 	"github.com/ontio/ontology/core/types"
 	"github.com/ontio/ontology/smartcontract/event"
-
-	"github.com/ont-project/ontology-framework/core"
+	cstate "github.com/ontio/ontology/smartcontract/states"
 )
 
 var DefLedger *Ledger
@@ -41,8 +38,8 @@ type Ledger struct {
 	ldgStore store.LedgerStore
 }
 
-func NewLedger(storageBlock, storageEvent, storageState core.Storage) (*Ledger, error) {
-	ldgStore, err := ledgerstore.NewLedgerStore(storageBlock, storageEvent, storageState)
+func NewLedger(dataDir string, stateHashHeight uint32) (*Ledger, error) {
+	ldgStore, err := ledgerstore.NewLedgerStore(dataDir, stateHashHeight)
 	if err != nil {
 		return nil, fmt.Errorf("NewLedgerStore error %s", err)
 	}
@@ -55,12 +52,8 @@ func (self *Ledger) GetStore() store.LedgerStore {
 	return self.ldgStore
 }
 
-func (self *Ledger) Init(defaultBookkeeper []keypair.PublicKey) error {
-	genesisBlock, err := genesis.GenesisBlockInit(defaultBookkeeper)
-	if err != nil {
-		return fmt.Errorf("genesisBlock error %s", err)
-	}
-	err = self.ldgStore.InitLedgerStoreWithGenesisBlock(genesisBlock, defaultBookkeeper)
+func (self *Ledger) Init(defaultBookkeeper []keypair.PublicKey, genesisBlock *types.Block) error {
+	err := self.ldgStore.InitLedgerStoreWithGenesisBlock(genesisBlock, defaultBookkeeper)
 	if err != nil {
 		return fmt.Errorf("InitLedgerStoreWithGenesisBlock error %s", err)
 	}
@@ -71,16 +64,28 @@ func (self *Ledger) AddHeaders(headers []*types.Header) error {
 	return self.ldgStore.AddHeaders(headers)
 }
 
-func (self *Ledger) AddBlock(block *types.Block) error {
-	err := self.ldgStore.AddBlock(block)
+func (self *Ledger) AddBlock(block *types.Block, stateMerkleRoot common.Uint256) error {
+	err := self.ldgStore.AddBlock(block, stateMerkleRoot)
 	if err != nil {
 		log.Errorf("Ledger AddBlock BlockHeight:%d BlockHash:%x error:%s", block.Header.Height, block.Hash(), err)
 	}
 	return err
 }
 
-func (self *Ledger) GetBlockRootWithNewTxRoot(txRoot common.Uint256) common.Uint256 {
-	return self.ldgStore.GetBlockRootWithNewTxRoot(txRoot)
+func (self *Ledger) ExecuteBlock(b *types.Block) (store.ExecuteResult, error) {
+	return self.ldgStore.ExecuteBlock(b)
+}
+
+func (self *Ledger) SubmitBlock(b *types.Block, exec store.ExecuteResult) error {
+	return self.ldgStore.SubmitBlock(b, exec)
+}
+
+func (self *Ledger) GetStateMerkleRoot(height uint32) (result common.Uint256, err error) {
+	return self.ldgStore.GetStateMerkleRoot(height)
+}
+
+func (self *Ledger) GetBlockRootWithNewTxRoots(startHeight uint32, txRoots []common.Uint256) common.Uint256 {
+	return self.ldgStore.GetBlockRootWithNewTxRoots(startHeight, txRoots)
 }
 
 func (self *Ledger) GetBlockByHeight(height uint32) (*types.Block, error) {
@@ -146,12 +151,12 @@ func (self *Ledger) GetBookkeeperState() (*states.BookkeeperState, error) {
 
 func (self *Ledger) GetStorageItem(codeHash common.Address, key []byte) ([]byte, error) {
 	storageKey := &states.StorageKey{
-		CodeHash: codeHash,
-		Key:      key,
+		ContractAddress: codeHash,
+		Key:             key,
 	}
 	storageItem, err := self.ldgStore.GetStorageItem(storageKey)
 	if err != nil {
-		return nil, fmt.Errorf("GetStorageItem error %s", err)
+		return nil, err
 	}
 	if storageItem == nil {
 		return nil, nil
@@ -167,14 +172,18 @@ func (self *Ledger) GetMerkleProof(proofHeight, rootHeight uint32) ([]common.Uin
 	return self.ldgStore.GetMerkleProof(proofHeight, rootHeight)
 }
 
-func (self *Ledger) PreExecuteContract(tx *types.Transaction) (interface{}, error) {
+func (self *Ledger) PreExecuteContract(tx *types.Transaction) (*cstate.PreExecResult, error) {
 	return self.ldgStore.PreExecuteContract(tx)
 }
 
-func (self *Ledger) GetEventNotifyByTx(tx common.Uint256) ([]*event.NotifyEventInfo, error) {
+func (self *Ledger) GetEventNotifyByTx(tx common.Uint256) (*event.ExecuteNotify, error) {
 	return self.ldgStore.GetEventNotifyByTx(tx)
 }
 
-func (self *Ledger) GetEventNotifyByBlock(height uint32) ([]common.Uint256, error) {
+func (self *Ledger) GetEventNotifyByBlock(height uint32) ([]*event.ExecuteNotify, error) {
 	return self.ldgStore.GetEventNotifyByBlock(height)
+}
+
+func (self *Ledger) Close() error {
+	return self.ldgStore.Close()
 }

@@ -16,6 +16,7 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Package websocket privides websocket server handler
 package websocket
 
 import (
@@ -28,13 +29,13 @@ import (
 	"sync"
 	"time"
 
-	cfg "github.com/ontio/ontology/common/config"
+	"github.com/gorilla/websocket"
 	"github.com/ontio/ontology/common"
+	cfg "github.com/ontio/ontology/common/config"
 	"github.com/ontio/ontology/common/log"
 	Err "github.com/ontio/ontology/http/base/error"
 	"github.com/ontio/ontology/http/base/rest"
 	"github.com/ontio/ontology/http/websocket/session"
-	"github.com/gorilla/websocket"
 )
 
 const (
@@ -49,8 +50,10 @@ type Handler struct {
 	handler  handler
 	pushFlag bool
 }
+
+//subscribe event for client
 type subscribe struct {
-	ConstractsFilter      []string `json:"ConstractsFilter"`
+	ContractsFilter       []string `json:"ContractsFilter"`
 	SubscribeEvent        bool     `json:"SubscribeEvent"`
 	SubscribeJsonBlock    bool     `json:"SubscribeJsonBlock"`
 	SubscribeRawBlock     bool     `json:"SubscribeRawBlock"`
@@ -61,12 +64,13 @@ type WsServer struct {
 	Upgrader     websocket.Upgrader
 	listener     net.Listener
 	server       *http.Server
-	SessionList  *session.SessionList
-	ActionMap    map[string]Handler
-	TxHashMap    map[string]string //key: txHash   value:sessionid
-	SubscribeMap map[string]subscribe
+	SessionList  *session.SessionList // websocket sesseionlist
+	ActionMap    map[string]Handler   //handler functions
+	TxHashMap    map[string]string    //key: txHash   value:sessionid
+	SubscribeMap map[string]subscribe //key: sessionId   value:subscribeInfo
 }
 
+//init websocket server
 func InitWsServer() *WsServer {
 	ws := &WsServer{
 		Upgrader:     websocket.Upgrader{},
@@ -77,8 +81,10 @@ func InitWsServer() *WsServer {
 	return ws
 }
 
+//start websocket server
 func (self *WsServer) Start() error {
-	if cfg.Parameters.HttpWsPort == 0 {
+	wsPort := int(cfg.DefConfig.Ws.HttpWsPort)
+	if wsPort == 0 {
 		log.Error("Not configure HttpWsPort port ")
 		return nil
 	}
@@ -88,7 +94,7 @@ func (self *WsServer) Start() error {
 	}
 
 	tlsFlag := false
-	if tlsFlag || cfg.Parameters.HttpWsPort%1000 == rest.TLS_PORT {
+	if tlsFlag || wsPort%1000 == rest.TLS_PORT {
 		var err error
 		self.listener, err = self.initTlsListen()
 		if err != nil {
@@ -97,7 +103,7 @@ func (self *WsServer) Start() error {
 		}
 	} else {
 		var err error
-		self.listener, err = net.Listen("tcp", ":"+strconv.Itoa(cfg.Parameters.HttpWsPort))
+		self.listener, err = net.Listen("tcp", ":"+strconv.Itoa(wsPort))
 		if err != nil {
 			log.Fatal("net.Listen: ", err.Error())
 			return err
@@ -118,6 +124,7 @@ func (self *WsServer) Start() error {
 
 }
 
+//registry handler method
 func (self *WsServer) registryMethod() {
 
 	heartbeat := func(cmd map[string]interface{}) map[string]interface{} {
@@ -150,11 +157,11 @@ func (self *WsServer) registryMethod() {
 		if b, ok := cmd["SubscribeBlockTxHashs"].(bool); ok {
 			sub.SubscribeBlockTxHashs = b
 		}
-		if ctsf, ok := cmd["ConstractsFilter"].([]interface{}); ok {
-			sub.ConstractsFilter = []string{}
-			for _,v := range ctsf{
-				if addr,k := v.(string);k{
-					sub.ConstractsFilter = append(sub.ConstractsFilter,addr)
+		if ctsf, ok := cmd["ContractsFilter"].([]interface{}); ok {
+			sub.ContractsFilter = []string{}
+			for _, v := range ctsf {
+				if addr, k := v.(string); k {
+					sub.ContractsFilter = append(sub.ContractsFilter, addr)
 				}
 			}
 		}
@@ -171,22 +178,31 @@ func (self *WsServer) registryMethod() {
 		return resp
 	}
 	actionMap := map[string]Handler{
-		"getblockheightbytxhash": {handler: rest.GetBlockHeightByTxHash},
-		"getsmartcodeevent":      {handler: rest.GetSmartCodeEventByTxHash},
-		"getsmartcodeeventtxs":   {handler: rest.GetSmartCodeEventTxsByHeight},
-		"getcontract":            {handler: rest.GetContractState},
-		"getbalance":             {handler: rest.GetBalance},
-		"getconnectioncount":     {handler: rest.GetConnectionCount},
-		"getblockbyheight":       {handler: rest.GetBlockByHeight},
-		"getblockbyhash":         {handler: rest.GetBlockByHash},
-		"getblockheight":         {handler: rest.GetBlockHeight},
-		"getgenerateblocktime":   {handler: rest.GetGenerateBlockTime},
-		"gettransaction":         {handler: rest.GetTransactionByHash},
-		"sendrawtransaction":     {handler: rest.SendRawTransaction, pushFlag: true},
-		"heartbeat":              {handler: heartbeat},
-		"subscribe":              {handler: subscribe},
-		"getstorage":             {handler: rest.GetStorage},
-		"getmerkleproof":        {handler: rest.GetMerkleProof},
+		"getblockheightbytxhash":    {handler: rest.GetBlockHeightByTxHash},
+		"getsmartcodeeventbyhash":   {handler: rest.GetSmartCodeEventByTxHash},
+		"getsmartcodeeventbyheight": {handler: rest.GetSmartCodeEventTxsByHeight},
+		"getcontract":               {handler: rest.GetContractState},
+		"getbalance":                {handler: rest.GetBalance},
+		"getconnectioncount":        {handler: rest.GetConnectionCount},
+		"getblockbyheight":          {handler: rest.GetBlockByHeight},
+		"getblockhash":              {handler: rest.GetBlockHash},
+		"getblockbyhash":            {handler: rest.GetBlockByHash},
+		"getblockheight":            {handler: rest.GetBlockHeight},
+		"gettransaction":            {handler: rest.GetTransactionByHash},
+		"sendrawtransaction":        {handler: rest.SendRawTransaction, pushFlag: true},
+		"heartbeat":                 {handler: heartbeat},
+		"subscribe":                 {handler: subscribe},
+		"getstorage":                {handler: rest.GetStorage},
+		"getallowance":              {handler: rest.GetAllowance},
+		"getmerkleproof":            {handler: rest.GetMerkleProof},
+		"getblocktxsbyheight":       {handler: rest.GetBlockTxsByHeight},
+		"getgasprice":               {handler: rest.GetGasPrice},
+		"getunboundong":             {handler: rest.GetUnboundOng},
+		"getgrantong":               {handler: rest.GetGrantOng},
+		"getmempooltxcount":         {handler: rest.GetMemPoolTxCount},
+		"getmempooltxstate":         {handler: rest.GetMemPoolTxState},
+		"getversion":                {handler: rest.GetNodeVersion},
+		"getnetworkid":              {handler: rest.GetNetworkId},
 
 		"getsessioncount": {handler: getsessioncount},
 	}
@@ -196,7 +212,7 @@ func (self *WsServer) registryMethod() {
 func (self *WsServer) Stop() {
 	if self.server != nil {
 		self.server.Shutdown(context.Background())
-		log.Error("Close websocket ")
+		log.Infof("Close websocket ")
 	}
 }
 func (self *WsServer) Restart() {
@@ -208,6 +224,7 @@ func (self *WsServer) Restart() {
 	}()
 }
 
+//check sessions timeout,if expire close the session
 func (self *WsServer) checkSessionsTimeout(done chan bool) {
 	ticker := time.NewTicker(time.Second * 10)
 	defer ticker.Stop()
@@ -266,7 +283,7 @@ func (self *WsServer) webSocketHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		e, ok := err.(net.Error)
 		if !ok || !e.Timeout() {
-			log.Error("websocket conn:", err)
+			log.Infof("websocket conn:", err)
 			return
 		}
 	}
@@ -290,7 +307,7 @@ func (self *WsServer) OnDataHandle(curSession *session.Session, bysMsg []byte, r
 	if err := json.Unmarshal(bysMsg, &req); err != nil {
 		resp := rest.ResponsePack(Err.ILLEGAL_DATAFORMAT)
 		curSession.Send(marshalResp(resp))
-		log.Error("websocket OnDataHandle:", err)
+		log.Infof("websocket OnDataHandle:", err)
 		return false
 	}
 	actionName, ok := req["Action"].(string)
@@ -364,25 +381,25 @@ func marshalResp(resp map[string]interface{}) []byte {
 	resp["Desc"] = Err.ErrMap[resp["Error"].(int64)]
 	data, err := json.Marshal(resp)
 	if err != nil {
-		log.Error("Websocket marshal json error:", err)
+		log.Infof("Websocket marshal json error:", err)
 		return nil
 	}
 
 	return data
 }
 
-func (self *WsServer) PushTxResult(contractAddrs map[string]bool,txHashStr string, resp map[string]interface{}) {
+func (self *WsServer) PushTxResult(contractAddrs map[string]bool, txHashStr string, resp map[string]interface{}) {
 	self.Lock()
 	sessionId := self.TxHashMap[txHashStr]
 	delete(self.TxHashMap, txHashStr)
 	//avoid twice, will send in BroadcastToSubscribers
 	sub := self.SubscribeMap[sessionId]
 	if sub.SubscribeEvent {
-		if len(sub.ConstractsFilter) == 0 {
+		if len(sub.ContractsFilter) == 0 {
 			self.Unlock()
 			return
 		}
-		for _, addr := range sub.ConstractsFilter {
+		for _, addr := range sub.ContractsFilter {
 			if contractAddrs[addr] {
 				self.Unlock()
 				return
@@ -396,7 +413,7 @@ func (self *WsServer) PushTxResult(contractAddrs map[string]bool,txHashStr strin
 		s.Send(marshalResp(resp))
 	}
 }
-func (self *WsServer) BroadcastToSubscribers(contractAddrs map[string]bool,sub int, resp map[string]interface{}) {
+func (self *WsServer) BroadcastToSubscribers(contractAddrs map[string]bool, sub int, resp map[string]interface{}) {
 	// broadcast SubscribeMap
 	self.Lock()
 	defer self.Unlock()
@@ -413,11 +430,11 @@ func (self *WsServer) BroadcastToSubscribers(contractAddrs map[string]bool,sub i
 		} else if sub == WSTOPIC_TXHASHS && v.SubscribeBlockTxHashs {
 			s.Send(data)
 		} else if sub == WSTOPIC_EVENT && v.SubscribeEvent {
-			if len(v.ConstractsFilter) == 0 {
+			if len(v.ContractsFilter) == 0 {
 				s.Send(data)
 				continue
 			}
-			for _, addr := range v.ConstractsFilter {
+			for _, addr := range v.ContractsFilter {
 				if contractAddrs[addr] {
 					s.Send(data)
 					break
@@ -429,8 +446,8 @@ func (self *WsServer) BroadcastToSubscribers(contractAddrs map[string]bool,sub i
 
 func (self *WsServer) initTlsListen() (net.Listener, error) {
 
-	certPath := cfg.Parameters.HttpCertPath
-	keyPath := cfg.Parameters.HttpKeyPath
+	certPath := cfg.DefConfig.Ws.HttpCertPath
+	keyPath := cfg.DefConfig.Ws.HttpKeyPath
 
 	// load cert
 	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
@@ -443,8 +460,9 @@ func (self *WsServer) initTlsListen() (net.Listener, error) {
 		Certificates: []tls.Certificate{cert},
 	}
 
-	log.Info("TLS listen port is ", strconv.Itoa(cfg.Parameters.HttpWsPort))
-	listener, err := tls.Listen("tcp", ":"+strconv.Itoa(cfg.Parameters.HttpWsPort), tlsConfig)
+	wsPort := strconv.Itoa(int(cfg.DefConfig.Ws.HttpWsPort))
+	log.Info("TLS listen port is ", wsPort)
+	listener, err := tls.Listen("tcp", ":"+wsPort, tlsConfig)
 	if err != nil {
 		log.Error(err)
 		return nil, err

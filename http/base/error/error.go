@@ -16,6 +16,7 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Package error privides error code for http
 package error
 
 import ontErrors "github.com/ontio/ontology/errors"
@@ -37,10 +38,11 @@ const (
 	UNKNOWN_TRANSACTION int64 = 44001
 	UNKNOWN_ASSET       int64 = 44002
 	UNKNOWN_BLOCK       int64 = 44003
-	UNKNWN_CONTRACT     int64 = 44004
+	UNKNOWN_CONTRACT    int64 = 44004
 
 	INTERNAL_ERROR  int64 = 45001
 	SMARTCODE_ERROR int64 = 47001
+	PRE_EXEC_ERROR  int64 = 47002
 )
 
 var ErrMap = map[int64]string{
@@ -60,9 +62,13 @@ var ErrMap = map[int64]string{
 	UNKNOWN_TRANSACTION: "UNKNOWN TRANSACTION",
 	UNKNOWN_ASSET:       "UNKNOWN ASSET",
 	UNKNOWN_BLOCK:       "UNKNOWN BLOCK",
+	UNKNOWN_CONTRACT:    "UNKNOWN CONTRACT",
 
 	INTERNAL_ERROR:                           "INTERNAL ERROR",
 	SMARTCODE_ERROR:                          "SMARTCODE EXEC ERROR",
+	PRE_EXEC_ERROR:                           "SMARTCODE PREPARE EXEC ERROR",
+	int64(ontErrors.ErrNoCode):               "INTERNAL ERROR, ErrNoCode",
+	int64(ontErrors.ErrUnknown):              "INTERNAL ERROR, ErrUnknown",
 	int64(ontErrors.ErrDuplicatedTx):         "INTERNAL ERROR, ErrDuplicatedTx",
 	int64(ontErrors.ErrDuplicateInput):       "INTERNAL ERROR, ErrDuplicateInput",
 	int64(ontErrors.ErrAssetPrecision):       "INTERNAL ERROR, ErrAssetPrecision",

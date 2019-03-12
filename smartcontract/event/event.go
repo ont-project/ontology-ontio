@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	EVENT_LOG = "Log"
+	EVENT_LOG    = "Log"
 	EVENT_NOTIFY = "Notify"
 )
 
@@ -36,7 +36,7 @@ func PushSmartCodeEvent(txHash common.Uint256, errcode int64, action string, res
 		return
 	}
 	smartCodeEvt := &types.SmartCodeEvent{
-		TxHash: common.ToHexString(txHash.ToArray()),
+		TxHash: txHash,
 		Action: action,
 		Result: result,
 		Error:  errcode,

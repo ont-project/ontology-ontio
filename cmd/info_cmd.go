@@ -19,187 +19,173 @@
 package cmd
 
 import (
-	"bytes"
-	"encoding/json"
+	"encoding/hex"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"strconv"
-
-	"github.com/ontio/ontology/cmd/common"
 	"github.com/ontio/ontology/cmd/utils"
+	"github.com/ontio/ontology/core/types"
+	httpcom "github.com/ontio/ontology/http/base/common"
 	"github.com/urfave/cli"
+	"strconv"
 )
 
-var (
-	InfoCommand = cli.Command{
-		Action: utils.MigrateFlags(infoCommand),
-		Name:   "info",
-		Usage:  "Display informations about the chain",
-		Flags:  append(NodeFlags, InfoFlags...),
-		Subcommands: []cli.Command{
-			blockCommandSet,
-			txCommandSet,
-			versionCommand,
-		},
-		Description: ``,
-	}
-)
-
-var blockCommandSet = cli.Command{
-	Action:       utils.MigrateFlags(blockInfoCommand),
-	Name:         "block",
-	Usage:        "Display block informations",
-	Flags:        append(NodeFlags, InfoFlags...),
-	OnUsageError: blockInfoUsageError,
-	Description:  ``,
+var InfoCommand = cli.Command{
+	Name:  "info",
+	Usage: "Display information about the chain",
 	Subcommands: []cli.Command{
 		{
-			Action:      utils.MigrateFlags(getCurrentBlockHeight),
-			Name:        "count",
-			Usage:       "issue asset by command",
-			Description: ``,
+			Action:    txInfo,
+			Name:      "tx",
+			Usage:     "Display transaction information",
+			ArgsUsage: "txHash",
+			Flags: []cli.Flag{
+				utils.RPCPortFlag,
+			},
+			Description: "Display transaction information",
+		},
+		{
+			Action:    blockInfo,
+			Name:      "block",
+			Usage:     "Display block information",
+			ArgsUsage: "<blochHash|height>",
+			Flags: []cli.Flag{
+				utils.RPCPortFlag,
+			},
+			Description: "Display block information",
+		},
+		{
+			Action:      txStatus,
+			Name:        "status",
+			Usage:       "Display transaction status",
+			ArgsUsage:   "<txhash>",
+			Description: `Display status of transaction.`,
+			Flags: []cli.Flag{
+				utils.RPCPortFlag,
+			},
+		},
+		{
+			Action:      curBlockHeight,
+			Name:        "curblockheight",
+			Usage:       "Display the current block height",
+			ArgsUsage:   "",
+			Description: `Display the current block height.`,
+			Flags: []cli.Flag{
+				utils.RPCPortFlag,
+			},
 		},
 	},
+	Description: `Query information command can query information such as blocks, transactions, and transaction executions. 
+You can use the ./Ontology info block --help command to view help information.`,
 }
 
-var txCommandSet = cli.Command{
-	Action:       utils.MigrateFlags(txInfoCommand),
-	Name:         "tx",
-	Usage:        "Display transaction informations",
-	Flags:        append(NodeFlags, InfoFlags...),
-	OnUsageError: txInfoUsageError,
-	Description:  ``,
+var ShowTxCommand = cli.Command{
+	Action:    showTx,
+	Name:      "showtx",
+	Usage:     "Show info of raw transaction.",
+	ArgsUsage: "<rawtx>",
+	Flags: []cli.Flag{
+		utils.RPCPortFlag,
+	},
+	Description: "Show info of raw transaction.",
 }
 
-var versionCommand = cli.Command{
-	Action:       utils.MigrateFlags(versionInfoCommand),
-	Name:         "version",
-	Usage:        "Display the version",
-	OnUsageError: versionInfoUsageError,
-	Description:  ``,
-}
-
-func infoCommand(context *cli.Context) error {
-	showInfoHelp()
-	return nil
-}
-
-func blockInfoUsageError(context *cli.Context, err error, isSubcommand bool) error {
-	fmt.Println("Error:", err.Error())
-	showBlockInfoHelp()
-	return nil
-}
-
-func getCurrentBlockHeight(ctx *cli.Context) error {
-	height, err := ontSdk.Rpc.GetBlockCount()
-	if nil != err {
-		fmt.Printf("Get block height information is error:  %s", err.Error())
-		return err
-	}
-	fmt.Println("Current blockchain height: ", height)
-	return nil
-}
-
-func txInfoUsageError(context *cli.Context, err error, isSubcommand bool) error {
-	fmt.Println("Error:", err.Error())
-	showTxInfoHelp()
-	return nil
-}
-
-func versionInfoUsageError(context *cli.Context, err error, isSubcommand bool) error {
-	fmt.Println("Error:", err.Error())
-	showVersionInfoHelp()
-	return nil
-}
-
-func versionInfoCommand(ctx *cli.Context) error {
-	version, err := ontSdk.Rpc.GetVersion()
-	if nil != err {
-		fmt.Printf("Get version information is error:  %s", err.Error())
-		return err
-	}
-	fmt.Println("Node version: ", version)
-	return nil
-}
-
-func txInfoCommand(ctx *cli.Context) error {
-	if ctx.IsSet(utils.HashInfoFlag.Name) {
-		txHash := ctx.String(utils.HashInfoFlag.Name)
-		resp, err := request("GET", nil, restfulAddr()+"/api/v1/transaction/"+txHash)
-		if err != nil {
-			return err
-		}
-		common.EchoJsonDataGracefully(resp)
+func blockInfo(ctx *cli.Context) error {
+	SetRpcPort(ctx)
+	if ctx.NArg() < 1 {
+		PrintErrorMsg("Missing argument,BlockHash or height expected.")
+		cli.ShowSubcommandHelp(ctx)
 		return nil
 	}
-	showTxInfoHelp()
-	return nil
-}
 
-func blockInfoCommand(ctx *cli.Context) error {
-	if ctx.IsSet(utils.HeightInfoFlag.Name) {
-		height := ctx.Int(utils.HeightInfoFlag.Name)
-		if height >= 0 {
-			resp, err := request("GET", nil, restfulAddr()+"/api/v1/block/details/height/"+strconv.Itoa(height))
-			if err != nil {
-				return err
-			}
-			common.EchoJsonDataGracefully(resp)
-			return nil
-		}
-	} else if ctx.IsSet(utils.HashInfoFlag.Name) {
-		blockHash := ctx.String(utils.HashInfoFlag.Name)
-		if "" != blockHash {
-			resp, err := request("GET", nil, restfulAddr()+"/api/v1/block/details/hash/"+blockHash)
-			if err != nil {
-				return err
-			}
-			common.EchoJsonDataGracefully(resp)
-			return nil
-		}
-	}
-	showBlockInfoHelp()
-	return nil
-}
-
-func request(method string, cmd map[string]interface{}, url string) (map[string]interface{}, error) {
-	hClient := &http.Client{}
-	var repMsg = make(map[string]interface{})
-	var response *http.Response
+	var data []byte
 	var err error
-	switch method {
-	case "GET":
-		req, err := http.NewRequest("GET", url, nil)
+	var height int64
+	arg := ctx.Args().First()
+	if len(arg) > 30 {
+		data, err = utils.GetBlock(arg)
 		if err != nil {
-			return repMsg, err
+			return fmt.Errorf("GetBlock error:%s", err)
 		}
-		response, err = hClient.Do(req)
-	case "POST":
-		data, err := json.Marshal(cmd)
+	} else {
+		height, err = strconv.ParseInt(arg, 10, 64)
 		if err != nil {
-			return repMsg, err
+			return fmt.Errorf("arg:%s invalid block hash or block height", arg)
 		}
-		reqData := bytes.NewBuffer(data)
-		req, err := http.NewRequest("POST", url, reqData)
+		data, err = utils.GetBlock(height)
 		if err != nil {
-			return repMsg, err
+			return fmt.Errorf("GetBlock error:%s", err)
 		}
-		req.Header.Set("Content-type", "application/json")
-		response, err = hClient.Do(req)
-	default:
-		return repMsg, err
 	}
-	if response != nil {
-		defer response.Body.Close()
+	PrintJsonData(data)
+	return nil
+}
 
-		body, _ := ioutil.ReadAll(response.Body)
-		if err := json.Unmarshal(body, &repMsg); err == nil {
-			return repMsg, err
-		}
+func txInfo(ctx *cli.Context) error {
+	SetRpcPort(ctx)
+	if ctx.NArg() < 1 {
+		PrintErrorMsg("Missing argument. TxHash expected.")
+		cli.ShowSubcommandHelp(ctx)
+		return nil
 	}
+	txInfo, err := utils.GetRawTransaction(ctx.Args().First())
 	if err != nil {
-		return repMsg, err
+		return fmt.Errorf("GetRawTransaction error:%s", err)
 	}
-	return repMsg, err
+	PrintJsonData(txInfo)
+	return nil
+}
+
+func txStatus(ctx *cli.Context) error {
+	SetRpcPort(ctx)
+	if ctx.NArg() < 1 {
+		PrintErrorMsg("Missing argument. TxHash expected.")
+		cli.ShowSubcommandHelp(ctx)
+		return nil
+	}
+	txHash := ctx.Args().First()
+	evtInfos, err := utils.GetSmartContractEventInfo(txHash)
+	if err != nil {
+		return fmt.Errorf("GetSmartContractEvent error:%s", err)
+	}
+	if string(evtInfos) == "null" {
+		PrintInfoMsg("Cannot get SmartContractEvent by TxHash:%s.", txHash)
+		return nil
+	}
+	PrintInfoMsg("Transaction states:")
+	PrintJsonData(evtInfos)
+	return nil
+}
+
+func curBlockHeight(ctx *cli.Context) error {
+	SetRpcPort(ctx)
+	count, err := utils.GetBlockCount()
+	if err != nil {
+		return err
+	}
+	PrintInfoMsg("CurrentBlockHeight:%d", count-1)
+	return nil
+}
+
+func showTx(ctx *cli.Context) error {
+	SetRpcPort(ctx)
+	if ctx.NArg() < 1 {
+		PrintErrorMsg("Missing raw tx argument.")
+		cli.ShowSubcommandHelp(ctx)
+		return nil
+	}
+	rawTx := ctx.Args().First()
+	txData, err := hex.DecodeString(rawTx)
+	if err != nil {
+		return fmt.Errorf("RawTx hex decode error:%s", err)
+	}
+	tx, err := types.TransactionFromRawBytes(txData)
+	if err != nil {
+		return fmt.Errorf("TransactionFromRawBytes error:%s", err)
+	}
+	txInfo := httpcom.TransArryByteToHexString(tx)
+
+	txHash := tx.Hash()
+	height, _ := utils.GetTxHeight(txHash.ToHexString())
+	txInfo.Height = height
+	PrintJsonObject(txInfo)
+	return nil
 }

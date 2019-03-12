@@ -23,7 +23,7 @@ import (
 	"encoding/binary"
 	"math/big"
 
-	"github.com/ontio/ontology/vm/neovm/types"
+	"github.com/ontio/ontology/common"
 )
 
 type ParamsBuilder struct {
@@ -60,7 +60,7 @@ func (p *ParamsBuilder) EmitPushInteger(data *big.Int) {
 		return
 	}
 
-	bytes := types.ConvertBigIntegerToBytes(data)
+	bytes := common.BigIntToNeoBytes(data)
 	p.EmitPushByteArray(bytes)
 }
 
@@ -85,9 +85,9 @@ func (p *ParamsBuilder) EmitPushByteArray(data []byte) {
 	p.buffer.Write(data)
 }
 
-func (p *ParamsBuilder) EmitPushCall(codeHash []byte) {
+func (p *ParamsBuilder) EmitPushCall(address []byte) {
 	p.Emit(APPCALL)
-	p.buffer.Write(codeHash)
+	p.buffer.Write(address)
 }
 
 func (p *ParamsBuilder) ToArray() []byte {

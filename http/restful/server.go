@@ -16,15 +16,15 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Package restful privides a function to start restful server
 package restful
 
 import (
 	"github.com/ontio/ontology/http/restful/restful"
 )
 
+//start restful
 func StartServer() {
-	func() {
-		rt := restful.InitRestServer()
-		go rt.Start()
-	}()
+	rt := restful.InitRestServer()
+	go rt.Start()
 }

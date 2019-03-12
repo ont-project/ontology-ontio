@@ -19,133 +19,55 @@
 package ledgerstore
 
 import (
+	"math/rand"
 	"testing"
 
-	"github.com/ontio/ontology/core/payload"
-	"github.com/ontio/ontology/core/states"
-	scommon "github.com/ontio/ontology/core/store/common"
-	"github.com/ontio/ontology/core/store/statestore"
-	vmtypes "github.com/ontio/ontology/smartcontract/types"
-	"github.com/ontio/ontology-crypto/keypair"
+	"github.com/ontio/ontology/common"
+	"github.com/ontio/ontology/merkle"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestContractState(t *testing.T) {
-	batch, err := getStateBatch()
-	if err != nil {
-		t.Errorf("NewStateBatch error %s", err)
-		return
-	}
-	testCode := []byte("testcode")
+func TestStateMerkleRoot(t *testing.T) {
+	teststatemerkleroot := func(H, effectiveStateHashHeight uint32) {
+		diffHashes := make([]common.Uint256, 0, H)
+		for i := uint32(0); i < H; i++ {
+			var hash common.Uint256
+			rand.Read(hash[:])
+			diffHashes = append(diffHashes, hash)
+		}
+		db := NewMemStateStore(effectiveStateHashHeight)
+		for h, hash := range diffHashes[:effectiveStateHashHeight] {
+			height := uint32(h)
+			db.NewBatch()
+			err := db.AddStateMerkleTreeRoot(height, hash)
+			assert.Nil(t, err)
+			db.CommitTo()
+			root, _ := db.GetStateMerkleRoot(height)
+			assert.Equal(t, root, common.UINT256_EMPTY)
+		}
 
-	vmCode := &vmtypes.VmCode{
-		VmType: vmtypes.NEOVM,
-		Code:   testCode,
-	}
-	deploy := &payload.DeployCode{
-		Code:        vmCode,
-		NeedStorage: false,
-		Name:        "testsm",
-		Version:     "v1.0",
-		Author:      "",
-		Email:       "",
-		Description: "",
-	}
-	code := &vmtypes.VmCode{
-		Code:   testCode,
-		VmType: vmtypes.NEOVM,
-	}
-	codeHash := code.AddressFromVmCode()
-	err = batch.TryGetOrAdd(
-		scommon.ST_CONTRACT,
-		codeHash[:],
-		deploy,
-		false)
-	if err != nil {
-		t.Errorf("TryGetOrAdd contract error %s", err)
-		return
-	}
+		merkleTree := merkle.NewTree(0, nil, nil)
+		for h, hash := range diffHashes[effectiveStateHashHeight:] {
+			height := uint32(h) + effectiveStateHashHeight
+			merkleTree.AppendHash(hash)
+			root1 := db.GetStateMerkleRootWithNewHash(hash)
+			db.NewBatch()
+			err := db.AddStateMerkleTreeRoot(height, hash)
+			assert.Nil(t, err)
+			db.CommitTo()
+			root2, _ := db.GetStateMerkleRoot(height)
+			root3 := merkleTree.Root()
 
-	err = batch.CommitTo()
-	if err != nil {
-		t.Errorf("batch.CommitTo error %s", err)
-		return
-	}
-	err = testStateStore.CommitTo()
-	if err != nil {
-		t.Errorf("testStateStore.CommitTo error %s", err)
-		return
-	}
-	contractState1, err := testStateStore.GetContractState(codeHash)
-	if err != nil {
-		t.Errorf("GetContractState error %s", err)
-		return
-	}
-	if contractState1.Name != deploy.Name ||
-		contractState1.Version != deploy.Version ||
-		contractState1.Author != deploy.Author ||
-		contractState1.Description != deploy.Description ||
-		contractState1.Email != deploy.Email {
-		t.Errorf("TestContractState failed %+v != %+v", contractState1, deploy)
-		return
-	}
-}
-
-func TestBookkeeperState(t *testing.T) {
-	batch, err := getStateBatch()
-	if err != nil {
-		t.Errorf("NewStateBatch error %s", err)
-		return
-	}
-
-	_, pubKey1, _ := keypair.GenerateKeyPair(keypair.PK_ECDSA, keypair.P256)
-	_, pubKey2, _ := keypair.GenerateKeyPair(keypair.PK_ECDSA, keypair.P256)
-	currBookkeepers := make([]keypair.PublicKey, 0)
-	currBookkeepers = append(currBookkeepers, &pubKey1)
-	currBookkeepers = append(currBookkeepers, &pubKey2)
-	nextBookkeepers := make([]keypair.PublicKey, 0)
-	nextBookkeepers = append(nextBookkeepers, &pubKey1)
-	nextBookkeepers = append(nextBookkeepers, &pubKey2)
-
-	bookkeeperState := &states.BookkeeperState{
-		CurrBookkeeper: currBookkeepers,
-		NextBookkeeper: nextBookkeepers,
-	}
-	batch.TryAdd(scommon.ST_BOOKKEEPER, BookerKeeper, bookkeeperState, false)
-	err = batch.CommitTo()
-	if err != nil {
-		t.Errorf("batch.CommitTo error %s", err)
-		return
-	}
-	err = testStateStore.CommitTo()
-	if err != nil {
-		t.Errorf("testStateStore.CommitTo error %s", err)
-		return
-	}
-	bookState, err := testStateStore.GetBookkeeperState()
-	if err != nil {
-		t.Errorf("GetBookkeeperState error %s", err)
-		return
-	}
-	currBookkeepers1 := bookState.CurrBookkeeper
-	nextBookkeepers1 := bookState.NextBookkeeper
-	for index, pk := range currBookkeepers {
-		pk1 := currBookkeepers1[index]
-		if !keypair.ComparePublicKey(pk, pk1) {
-			t.Errorf("TestBookkeeperState currentBookkeeper failed")
-			return
+			assert.Equal(t, root1, root2)
+			assert.Equal(t, root1, root3)
 		}
 	}
-	for index, pk := range nextBookkeepers {
-		pk1 := nextBookkeepers1[index]
-		if !keypair.ComparePublicKey(pk, pk1) {
-			t.Errorf("TestBookkeeperState nextBookkeeper failed")
-			return
-		}
-	}
-}
 
-func getStateBatch() (*statestore.StateBatch, error) {
-	testStateStore.NewBatch()
-	batch := testStateStore.NewStateBatch()
-	return batch, nil
+	for i := 0; i < 200; i++ {
+		teststatemerkleroot(1024, uint32(i))
+		h := rand.Uint32()%1000 + 1
+		eff := rand.Uint32() % h
+		teststatemerkleroot(h, eff)
+	}
+
 }

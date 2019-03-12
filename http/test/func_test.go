@@ -21,22 +21,14 @@ package test
 import (
 	"bytes"
 	"fmt"
-	"math/big"
-	"testing"
-	"time"
-
 	"github.com/ontio/ontology-crypto/keypair"
-	"github.com/ontio/ontology/account"
 	"github.com/ontio/ontology/common"
-	"github.com/ontio/ontology/core/signature"
 	"github.com/ontio/ontology/core/types"
-	ctypes "github.com/ontio/ontology/core/types"
-	"github.com/ontio/ontology/core/utils"
 	"github.com/ontio/ontology/merkle"
 	"github.com/ontio/ontology/vm/neovm"
-	vmtypes "github.com/ontio/ontology/smartcontract/types"
 	"github.com/stretchr/testify/assert"
-	"encoding/json"
+	"math/big"
+	"testing"
 )
 
 func TestMerkleVerifier(t *testing.T) {
@@ -82,29 +74,15 @@ func TestMerkleVerifier(t *testing.T) {
 
 }
 
-func TestCodeHash(t *testing.T) {
-	code, _ := common.HexToBytes("")
-	vmcode := vmtypes.VmCode{vmtypes.NEOVM, code}
-	codehash := vmcode.AddressFromVmCode()
-	assert.Contains(t,codehash.ToHexString(),"")
-}
-
 func TestTxDeserialize(t *testing.T) {
-	bys, _ := common.HexToBytes("")
-	var txn types.Transaction
-	err := txn.Deserialize(bytes.NewReader(bys));
+	bys, _ := common.HexToBytes("00d1af758596f401000000000000204e000000000000b09ba6a4fe99eb2b2dc1d86a6d453423a6be03f02e0101011552c1126765744469736b506c61796572734c697374676a6f1082c6cec3a1bcbb5a3892cf770061e4b98200014241015d434467639fd8e7b4331d2f3fc0d4168e2d68a203593c6399f5746d2324217aeeb3db8ff31ba0fdb1b13aa6f4c3cd25f7b3d0d26c144bbd75e2963d0a443629232103fdcae8110c9a60d1fc47f8111a12c1941e1f3584b0b0028157736ed1eecd101eac")
+	_, err := types.TransactionFromRawBytes(bys)
 	assert.Nil(t, err)
-
-	assert.Contains(t,txn.TxType,0)
 }
 func TestAddress(t *testing.T) {
 	pubkey, _ := common.HexToBytes("120203a4e50edc1e59979442b83f327030a56bffd08c2de3e0a404cefb4ed2cc04ca3e")
-	pk, err := keypair.DeserializePublicKey(pubkey)
+	_, err := keypair.DeserializePublicKey(pubkey)
 	assert.Nil(t, err)
-
-	ui60 := types.AddressFromPubKey(pk)
-	addr := common.ToHexString(ui60[:])
-	assert.Contains(t,addr,0)
 }
 func TestMultiPubKeysAddress(t *testing.T) {
 	pubkey, _ := common.HexToBytes("120203a4e50edc1e59979442b83f327030a56bffd08c2de3e0a404cefb4ed2cc04ca3e")
@@ -115,55 +93,10 @@ func TestMultiPubKeysAddress(t *testing.T) {
 	pk2, err := keypair.DeserializePublicKey(pubkey2)
 	assert.Nil(t, err)
 
-	ui60, _ := types.AddressFromMultiPubKeys([]keypair.PublicKey{pk, pk2}, 1)
-	addr := common.ToHexString(ui60[:])
-	assert.Contains(t,addr,0)
+	_, err = types.AddressFromMultiPubKeys([]keypair.PublicKey{pk, pk2}, 1)
+	assert.Nil(t, err)
 }
 
-func TestInvokefunction(t *testing.T) {
-	var funcName = "Get"
-	builder := neovm.NewParamsBuilder(new(bytes.Buffer))
-	err := BuildSmartContractParamInter(builder, []interface{}{funcName, []interface{}{[]byte("key")}})
-	assert.Nil(t, err)
-
-	codeParams := builder.ToArray()
-	op_verify,_ := common.HexToBytes("69")
-	codeaddress,_ := common.HexToBytes("809690ff6a5244cca5e64face79914d59daef527")
-
-	tx := utils.NewInvokeTransaction(vmtypes.VmCode{
-		VmType: vmtypes.NEOVM,
-		Code:   bytes.Join([][]byte{codeParams},bytes.Join([][]byte{op_verify},codeaddress)),
-	})
-	tx.Nonce = uint32(time.Now().Unix())
-
-	acct := account.Open(account.WALLET_FILENAME, []byte("passwordtest"))
-	acc, err := acct.GetDefaultAccount()
-	//pubkey := keypair.SerializePublicKey(acc.PubKey())
-	assert.Nil(t, err)
-	hash := tx.Hash()
-	sign, _ := signature.Sign(acc, hash[:])
-	tx.Sigs = append(tx.Sigs, &ctypes.Sig{
-		PubKeys: []keypair.PublicKey{acc.PublicKey},
-		M:       1,
-		SigData: [][]byte{sign},
-	})
-
-	txbf := new(bytes.Buffer)
-	err = tx.Serialize(txbf);
-	assert.Nil(t, err)
-
-	var req = map[string]interface{}{
-		"Action":  "sendrawtransaction",
-		"Version": "1.0.0",
-		"Data":    common.ToHexString(txbf.Bytes()),
-	}
-	resp, err := Request("POST", req, addr+"/api/v1/transaction?preExec=1")
-	if err != nil {
-		assert.Error(t,err)
-	}
-	r, _ := json.Marshal(resp)
-	assert.Contains(t,string(r),"SUCCESS")
-}
 func BuildSmartContractParamInter(builder *neovm.ParamsBuilder, smartContractParams []interface{}) error {
 	for i := len(smartContractParams) - 1; i >= 0; i-- {
 		switch v := smartContractParams[i].(type) {

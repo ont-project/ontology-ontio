@@ -1,10 +1,27 @@
+/*
+ * Copyright (C) 2018 The ontology Authors
+ * This file is part of The ontology library.
+ *
+ * The ontology is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * The ontology is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
+ */
 package common
 
 import (
+	"github.com/ontio/ontology-crypto/keypair"
 	"github.com/ontio/ontology/common"
 	"github.com/ontio/ontology/core/payload"
 	"github.com/ontio/ontology/core/types"
-	"github.com/ontio/ontology-crypto/keypair"
 )
 
 type PayloadInfo interface{}
@@ -15,12 +32,9 @@ type BookKeepingInfo struct {
 }
 
 type InvokeCodeInfo struct {
-	Code     string
-	GasLimit uint64
-	VmType   int
+	Code string
 }
 type DeployCodeInfo struct {
-	VmType      int
 	Code        string
 	NeedStorage bool
 	Name        string
@@ -28,14 +42,6 @@ type DeployCodeInfo struct {
 	Author      string
 	Email       string
 	Description string
-}
-
-//implement PayloadInfo define IssueAssetInfo
-type IssueAssetInfo struct {
-}
-
-//implement PayloadInfo define TransferAssetInfo
-type TransferAssetInfo struct {
 }
 
 type RecordInfo struct {
@@ -57,15 +63,6 @@ type DataFileInfo struct {
 	Issuer   string
 }
 
-type Claim struct {
-	Claims []*UTXOTxInput
-}
-
-type UTXOTxInput struct {
-	ReferTxID          string
-	ReferTxOutputIndex uint16
-}
-
 type PrivacyPayloadInfo struct {
 	PayloadType uint8
 	Payload     string
@@ -78,12 +75,9 @@ type VoteInfo struct {
 	Voter   string
 }
 
+//get tranasction payload data
 func TransPayloadToHex(p types.Payload) PayloadInfo {
 	switch object := p.(type) {
-	case *payload.Bookkeeping:
-		obj := new(BookKeepingInfo)
-		obj.Nonce = object.Nonce
-		return obj
 	case *payload.Bookkeeper:
 		obj := new(BookkeeperInfo)
 		pubKeyBytes := keypair.SerializePublicKey(object.PubKey)
@@ -101,14 +95,11 @@ func TransPayloadToHex(p types.Payload) PayloadInfo {
 		return obj
 	case *payload.InvokeCode:
 		obj := new(InvokeCodeInfo)
-		obj.Code = common.ToHexString(object.Code.Code)
-		obj.GasLimit = uint64(object.GasLimit)
-		obj.VmType = int(object.Code.VmType)
+		obj.Code = common.ToHexString(object.Code)
 		return obj
 	case *payload.DeployCode:
 		obj := new(DeployCodeInfo)
-		obj.VmType = int(object.Code.VmType)
-		obj.Code = common.ToHexString(object.Code.Code)
+		obj.Code = common.ToHexString(object.Code)
 		obj.NeedStorage = object.NeedStorage
 		obj.Name = object.Name
 		obj.CodeVersion = object.Version
@@ -116,14 +107,6 @@ func TransPayloadToHex(p types.Payload) PayloadInfo {
 		obj.Email = object.Email
 		obj.Description = object.Description
 		return obj
-	case *payload.Vote:
-		obj := new(VoteInfo)
-		obj.PubKeys = make([]string, len(object.PubKeys))
-		obj.Voter = common.ToHexString(object.Account[:])
-		for i, key := range object.PubKeys {
-			pubKeyBytes := keypair.SerializePublicKey(key)
-			obj.PubKeys[i] = common.ToHexString(pubKeyBytes)
-		}
 	}
 	return nil
 }

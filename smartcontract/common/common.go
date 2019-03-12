@@ -19,86 +19,79 @@
 package common
 
 import (
+	"errors"
+
 	"github.com/ontio/ontology/common"
-	"github.com/ontio/ontology/vm/neovm/types"
 	"github.com/ontio/ontology/common/log"
+	"github.com/ontio/ontology/vm/neovm/types"
 )
 
 // ConvertReturnTypes return neovm stack element value
 // According item types convert to hex string value
 // Now neovm support type contain: ByteArray/Integer/Boolean/Array/Struct/Interop/StackItems
-func ConvertNeoVmTypeHexString(item interface{}) interface{} {
+const (
+	MAX_COUNT = 1024
+)
+
+func ConvertNeoVmTypeHexString(item interface{}) (interface{}, error) {
+	var count int
+	return convertNeoVmTypeHexString(item, &count)
+}
+
+func convertNeoVmTypeHexString(item interface{}, count *int) (interface{}, error) {
 	if item == nil {
-		return nil
+		return nil, nil
+	}
+	if *count > MAX_COUNT {
+		return nil, errors.New("over max parameters convert length")
 	}
 	switch v := item.(type) {
 	case *types.ByteArray:
-		return common.ToHexString(v.GetByteArray())
+		arr, _ := v.GetByteArray()
+		return common.ToHexString(arr), nil
 	case *types.Integer:
-		if v.GetBigInteger().Sign() == 0 {
-			return common.ToHexString([]byte{0})
+		i, _ := v.GetBigInteger()
+		if i.Sign() == 0 {
+			return common.ToHexString([]byte{0}), nil
 		} else {
-			return common.ToHexString(types.ConvertBigIntegerToBytes(v.GetBigInteger()))
+			return common.ToHexString(common.BigIntToNeoBytes(i)), nil
 		}
 	case *types.Boolean:
-		if v.GetBoolean() {
-			return common.ToHexString([]byte{1})
+		b, _ := v.GetBoolean()
+		if b {
+			return common.ToHexString([]byte{1}), nil
 		} else {
-			return common.ToHexString([]byte{0})
+			return common.ToHexString([]byte{0}), nil
 		}
 	case *types.Array:
 		var arr []interface{}
-		for _, val := range v.GetArray() {
-			arr = append(arr, ConvertNeoVmTypeHexString(val))
+		ar, _ := v.GetArray()
+		for _, val := range ar {
+			*count++
+			cv, err := convertNeoVmTypeHexString(val, count)
+			if err != nil {
+				return nil, err
+			}
+			arr = append(arr, cv)
 		}
-		return arr
+		return arr, nil
 	case *types.Struct:
 		var arr []interface{}
-		for _, val := range v.GetStruct() {
-			arr = append(arr, ConvertNeoVmTypeHexString(val))
+		ar, _ := v.GetStruct()
+		for _, val := range ar {
+			*count++
+			cv, err := convertNeoVmTypeHexString(val, count)
+			if err != nil {
+				return nil, err
+			}
+			arr = append(arr, cv)
 		}
-		return arr
+		return arr, nil
 	case *types.Interop:
-		return common.ToHexString(v.GetInterface().ToArray())
+		it, _ := v.GetInterface()
+		return common.ToHexString(it.ToArray()), nil
 	default:
 		log.Error("[ConvertTypes] Invalid Types!")
-		return nil
+		return nil, errors.New("[ConvertTypes] Invalid Types!")
 	}
 }
-
-func ConvertNeoVmReturnTypes(item interface{}) interface{} {
-	if item == nil {
-		return nil
-	}
-	switch v := item.(type) {
-	case *types.ByteArray:
-		return v.GetByteArray()
-	case *types.Integer:
-		return types.ConvertBigIntegerToBytes(v.GetBigInteger())
-	case *types.Boolean:
-		if v.GetBoolean() {
-			return []byte{1}
-		}else {
-			return []byte{0}
-		}
-	case *types.Array:
-		var arr []interface{}
-		for _, val := range v.GetArray() {
-			arr = append(arr, ConvertNeoVmReturnTypes(val))
-		}
-		return arr
-	case *types.Struct:
-		var arr []interface{}
-		for _, val := range v.GetStruct() {
-			arr = append(arr, ConvertNeoVmReturnTypes(val))
-		}
-		return arr
-	case *types.Interop:
-		return v.GetInterface().ToArray()
-	default:
-		log.Error("[ConvertTypes] Invalid Types!")
-		return nil
-	}
-}
-
-

@@ -26,6 +26,7 @@ import (
 
 	"github.com/ontio/ontology/vm/neovm/interfaces"
 	"github.com/ontio/ontology/vm/neovm/types"
+	"golang.org/x/crypto/ripemd160"
 )
 
 type BigIntSorter []big.Int
@@ -197,6 +198,8 @@ func NewStackItem(data interface{}) types.StackItems {
 		stackItem = data.(*types.Integer)
 	case *types.Array:
 		stackItem = data.(*types.Array)
+	case *types.Map:
+		stackItem = data.(*types.Map)
 	case *types.Boolean:
 		stackItem = data.(*types.Boolean)
 	case *types.ByteArray:
@@ -231,37 +234,49 @@ func Hash(b []byte, e *ExecutionEngine) []byte {
 		sh = sha256.New()
 		sh.Write(b)
 		bt = sh.Sum(nil)
+	case HASH160:
+		temp := sha256.Sum256(b)
+		md := ripemd160.New()
+		md.Write(temp[:])
+		bt = md.Sum(nil)
+	case HASH256:
+		temp := sha256.Sum256(b)
+		data := sha256.Sum256(temp[:])
+		bt = data[:]
 	}
 	return bt
 }
 
-func PopBigInt(e *ExecutionEngine) *big.Int {
+func PopBigInt(e *ExecutionEngine) (*big.Int, error) {
 	x := PopStackItem(e)
 	return x.GetBigInteger()
 }
 
-func PopInt(e *ExecutionEngine) int {
-	x := PopBigInt(e)
+func PopInt(e *ExecutionEngine) (int, error) {
+	x, err := PopBigInt(e)
+	if err != nil {
+		return 0, err
+	}
 	n := int(x.Int64())
-	return n
+	return n, nil
 }
 
-func PopBoolean(e *ExecutionEngine) bool {
+func PopBoolean(e *ExecutionEngine) (bool, error) {
 	x := PopStackItem(e)
 	return x.GetBoolean()
 }
 
-func PopArray(e *ExecutionEngine) []types.StackItems {
+func PopArray(e *ExecutionEngine) ([]types.StackItems, error) {
 	x := PopStackItem(e)
 	return x.GetArray()
 }
 
-func PopInteropInterface(e *ExecutionEngine) interfaces.Interop {
+func PopInteropInterface(e *ExecutionEngine) (interfaces.Interop, error) {
 	x := PopStackItem(e)
 	return x.GetInterface()
 }
 
-func PopByteArray(e *ExecutionEngine) []byte {
+func PopByteArray(e *ExecutionEngine) ([]byte, error) {
 	x := PopStackItem(e)
 	return x.GetByteArray()
 }
@@ -270,23 +285,26 @@ func PopStackItem(e *ExecutionEngine) types.StackItems {
 	return e.EvaluationStack.Pop()
 }
 
-func PeekArray(e *ExecutionEngine) []types.StackItems {
+func PeekArray(e *ExecutionEngine) ([]types.StackItems, error) {
 	x := PeekStackItem(e)
 	return x.GetArray()
 }
 
-func PeekInteropInterface(e *ExecutionEngine) interfaces.Interop {
+func PeekInteropInterface(e *ExecutionEngine) (interfaces.Interop, error) {
 	x := PeekStackItem(e)
 	return x.GetInterface()
 }
 
-func PeekInt(e *ExecutionEngine) int {
-	x := PeekBigInteger(e)
+func PeekInt(e *ExecutionEngine) (int, error) {
+	x, err := PeekBigInteger(e)
+	if err != nil {
+		return 0, err
+	}
 	n := int(x.Int64())
-	return n
+	return n, nil
 }
 
-func PeekBigInteger(e *ExecutionEngine) *big.Int {
+func PeekBigInteger(e *ExecutionEngine) (*big.Int, error) {
 	x := PeekStackItem(e)
 	return x.GetBigInteger()
 }
@@ -295,18 +313,12 @@ func PeekStackItem(e *ExecutionEngine) types.StackItems {
 	return e.EvaluationStack.Peek(0)
 }
 
-func PeekNInt(i int, e *ExecutionEngine) int {
-	x := PeekNBigInt(i, e)
-	n := int(x.Int64())
-	return n
-}
-
-func PeekNBigInt(i int, e *ExecutionEngine) *big.Int {
+func PeekNBigInt(i int, e *ExecutionEngine) (*big.Int, error) {
 	x := PeekNStackItem(i, e)
 	return x.GetBigInteger()
 }
 
-func PeekNByteArray(i int, e *ExecutionEngine) []byte {
+func PeekNByteArray(i int, e *ExecutionEngine) ([]byte, error) {
 	x := PeekNStackItem(i, e)
 	return x.GetByteArray()
 }

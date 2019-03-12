@@ -19,7 +19,6 @@
 package native
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/ontio/ontology/common"
@@ -27,12 +26,13 @@ import (
 	"github.com/ontio/ontology/errors"
 	"github.com/ontio/ontology/smartcontract/context"
 	"github.com/ontio/ontology/smartcontract/event"
-	"github.com/ontio/ontology/smartcontract/storage"
+	"github.com/ontio/ontology/smartcontract/states"
 	sstates "github.com/ontio/ontology/smartcontract/states"
+	"github.com/ontio/ontology/smartcontract/storage"
 )
 
 type (
-	Handler         func(native *NativeService) error
+	Handler         func(native *NativeService) ([]byte, error)
 	RegisterService func(native *NativeService)
 )
 
@@ -43,13 +43,15 @@ var (
 // Native service struct
 // Invoke a native smart contract, new a native service
 type NativeService struct {
-	CloneCache    *storage.CloneCache
+	CacheDB       *storage.CacheDB
 	ServiceMap    map[string]Handler
 	Notifications []*event.NotifyEventInfo
-	Code          []byte
+	InvokeParam   sstates.ContractInvokeParam
 	Input         []byte
 	Tx            *types.Transaction
 	Height        uint32
+	Time          uint32
+	BlockHash     common.Uint256
 	ContextRef    context.ContextRef
 }
 
@@ -58,11 +60,7 @@ func (this *NativeService) Register(methodName string, handler Handler) {
 }
 
 func (this *NativeService) Invoke() (interface{}, error) {
-	bf := bytes.NewBuffer(this.Code)
-	contract := new(sstates.Contract)
-	if err := contract.Deserialize(bf); err != nil {
-		return false, err
-	}
+	contract := this.InvokeParam
 	services, ok := Contracts[contract.Address]
 	if !ok {
 		return false, fmt.Errorf("Native contract address %x haven't been registered.", contract.Address)
@@ -70,15 +68,31 @@ func (this *NativeService) Invoke() (interface{}, error) {
 	services(this)
 	service, ok := this.ServiceMap[contract.Method]
 	if !ok {
-		return false, fmt.Errorf("Native contract %x doesn't support this function %s.", contract.Address, contract.Method)
+		return false, fmt.Errorf("Native contract %x doesn't support this function %s.",
+			contract.Address, contract.Method)
 	}
+	args := this.Input
 	this.Input = contract.Args
 	this.ContextRef.PushContext(&context.Context{ContractAddress: contract.Address})
-	if err := service(this); err != nil {
-		return false, errors.NewDetailErr(err, errors.ErrNoCode, "[Invoke] Native serivce function execute error!")
+	notifications := this.Notifications
+	this.Notifications = []*event.NotifyEventInfo{}
+	result, err := service(this)
+	if err != nil {
+		return result, errors.NewDetailErr(err, errors.ErrNoCode, "[Invoke] Native serivce function execute error!")
 	}
 	this.ContextRef.PopContext()
 	this.ContextRef.PushNotifications(this.Notifications)
-	return true, nil
+	this.Notifications = notifications
+	this.Input = args
+	return result, nil
 }
 
+func (this *NativeService) NativeCall(address common.Address, method string, args []byte) (interface{}, error) {
+	c := states.ContractInvokeParam{
+		Address: address,
+		Method:  method,
+		Args:    args,
+	}
+	this.InvokeParam = c
+	return this.Invoke()
+}

@@ -23,31 +23,29 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-
 	"github.com/ontio/ontology/common"
+	"github.com/ontio/ontology/common/log"
 	"github.com/ontio/ontology/common/serialization"
 	scom "github.com/ontio/ontology/core/store/common"
+	"github.com/ontio/ontology/core/store/leveldbstore"
 	"github.com/ontio/ontology/smartcontract/event"
-
-	"github.com/ont-project/ontology-framework/core"
 )
 
 //Saving event notifies gen by smart contract execution
 type EventStore struct {
-	//dbDir string                     //Store path
-	//store *leveldbstore.LevelDBStore //Store handler
-	store core.Storage
+	dbDir string                     //Store path
+	store *leveldbstore.LevelDBStore //Store handler
 }
 
 //NewEventStore return event store instance
-func NewEventStore(storageEvent core.Storage) (*EventStore, error) {
-	//store, err := leveldbstore.NewLevelDBStore(dbDir)
-	//if err != nil {
-	//	return nil, err
-	//}
+func NewEventStore(dbDir string) (*EventStore, error) {
+	store, err := leveldbstore.NewLevelDBStore(dbDir)
+	if err != nil {
+		return nil, err
+	}
 	return &EventStore{
-		//dbDir: dbDir,
-		store: storageEvent,
+		dbDir: dbDir,
+		store: store,
 	}, nil
 }
 
@@ -57,8 +55,8 @@ func (this *EventStore) NewBatch() {
 }
 
 //SaveEventNotifyByTx persist event notify by transaction hash
-func (this *EventStore) SaveEventNotifyByTx(txHash common.Uint256, notifies []*event.NotifyEventInfo) error {
-	result, err := json.Marshal(notifies)
+func (this *EventStore) SaveEventNotifyByTx(txHash common.Uint256, notify *event.ExecuteNotify) error {
+	result, err := json.Marshal(notify)
 	if err != nil {
 		return fmt.Errorf("json.Marshal error %s", err)
 	}
@@ -91,33 +89,27 @@ func (this *EventStore) SaveEventNotifyByBlock(height uint32, txHashs []common.U
 }
 
 //GetEventNotifyByTx return event notify by trasanction hash
-func (this *EventStore) GetEventNotifyByTx(txHash common.Uint256) ([]*event.NotifyEventInfo, error) {
+func (this *EventStore) GetEventNotifyByTx(txHash common.Uint256) (*event.ExecuteNotify, error) {
 	key := this.getEventNotifyByTxKey(txHash)
 	data, err := this.store.Get(key)
 	if err != nil {
-		if err == core.ErrNotFound {
-			return nil, nil
-		}
 		return nil, err
 	}
-	var notifies []*event.NotifyEventInfo
-	if err = json.Unmarshal(data, &notifies); err != nil {
+	var notify event.ExecuteNotify
+	if err = json.Unmarshal(data, &notify); err != nil {
 		return nil, fmt.Errorf("json.Unmarshal error %s", err)
 	}
-	return notifies, nil
+	return &notify, nil
 }
 
-//GetEventNotifyByBlock return transaction hash which have event notify
-func (this *EventStore) GetEventNotifyByBlock(height uint32) ([]common.Uint256, error) {
+//GetEventNotifyByBlock return all event notify of transaction in block
+func (this *EventStore) GetEventNotifyByBlock(height uint32) ([]*event.ExecuteNotify, error) {
 	key, err := this.getEventNotifyByBlockKey(height)
 	if err != nil {
 		return nil, err
 	}
 	data, err := this.store.Get(key)
 	if err != nil {
-		if err == core.ErrNotFound {
-			return nil, nil
-		}
 		return nil, err
 	}
 	reader := bytes.NewBuffer(data)
@@ -125,16 +117,21 @@ func (this *EventStore) GetEventNotifyByBlock(height uint32) ([]common.Uint256, 
 	if err != nil {
 		return nil, fmt.Errorf("ReadUint32 error %s", err)
 	}
-	txHashs := make([]common.Uint256, 0, size)
+	evtNotifies := make([]*event.ExecuteNotify, 0)
 	for i := uint32(0); i < size; i++ {
 		var txHash common.Uint256
 		err = txHash.Deserialize(reader)
 		if err != nil {
 			return nil, fmt.Errorf("txHash.Deserialize error %s", err)
 		}
-		txHashs = append(txHashs, txHash)
+		evtNotify, err := this.GetEventNotifyByTx(txHash)
+		if err != nil {
+			log.Errorf("getEventNotifyByTx Height:%d by txhash:%s error:%s", height, txHash.ToHexString(), err)
+			continue
+		}
+		evtNotifies = append(evtNotifies, evtNotify)
 	}
-	return txHashs, nil
+	return evtNotifies, nil
 }
 
 //CommitTo event store batch to store
@@ -150,14 +147,14 @@ func (this *EventStore) Close() error {
 //ClearAll all data in event store
 func (this *EventStore) ClearAll() error {
 	this.NewBatch()
-	iter,err := this.store.NewIterator(nil)
-	if err != nil {
-		return err
-	}
+	iter := this.store.NewIterator(nil)
 	for iter.Next() {
 		this.store.BatchDelete(iter.Key())
 	}
 	iter.Release()
+	if err := iter.Error(); err != nil {
+		return err
+	}
 	return this.CommitTo()
 }
 
@@ -177,9 +174,6 @@ func (this *EventStore) GetCurrentBlock() (common.Uint256, uint32, error) {
 	key := this.getCurrentBlockKey()
 	data, err := this.store.Get(key)
 	if err != nil {
-		if err == core.ErrNotFound {
-			return common.Uint256{}, 0, nil
-		}
 		return common.Uint256{}, 0, err
 	}
 	reader := bytes.NewReader(data)

@@ -25,329 +25,386 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ontio/ontology-crypto/keypair"
 	"github.com/ontio/ontology/common"
-	"github.com/ontio/ontology/common/config"
+	"github.com/ontio/ontology/common/constants"
 	"github.com/ontio/ontology/common/serialization"
 	"github.com/ontio/ontology/core/payload"
-	"github.com/ontio/ontology-crypto/keypair"
+	"github.com/ontio/ontology/core/program"
 )
 
-type Transaction struct {
-	Version    byte
-	TxType     TransactionType
-	Nonce      uint32
-	Payload    Payload
-	Attributes []*TxAttribute
-	Fee        []*Fee
-	NetWorkFee common.Fixed64
-	Sigs       []*Sig
+const MAX_TX_SIZE = 1024 * 1024 // The max size of a transaction to prevent DOS attacks
 
-	hash *common.Uint256
+type Transaction struct {
+	Version  byte
+	TxType   TransactionType
+	Nonce    uint32
+	GasPrice uint64
+	GasLimit uint64
+	Payer    common.Address
+	Payload  Payload
+	//Attributes []*TxAttribute
+	attributes byte //this must be 0 now, Attribute Array length use VarUint encoding, so byte is enough for extension
+	Sigs       []RawSig
+
+	Raw []byte // raw transaction data
+
+	hash       common.Uint256
+	SignedAddr []common.Address // this is assigned when passed signature verification
+
+	nonDirectConstracted bool // used to check literal construction like `tx := &Transaction{...}`
+}
+
+// if no error, ownership of param raw is transfered to Transaction
+func TransactionFromRawBytes(raw []byte) (*Transaction, error) {
+	if len(raw) > MAX_TX_SIZE {
+		return nil, errors.New("execced max transaction size")
+	}
+	source := common.NewZeroCopySource(raw)
+	tx := &Transaction{Raw: raw}
+	err := tx.Deserialization(source)
+	if err != nil {
+		return nil, err
+	}
+	return tx, nil
+}
+
+// Transaction has internal reference of param `source`
+func (tx *Transaction) Deserialization(source *common.ZeroCopySource) error {
+	pstart := source.Pos()
+	err := tx.deserializationUnsigned(source)
+	if err != nil {
+		return err
+	}
+	pos := source.Pos()
+	lenUnsigned := pos - pstart
+	source.BackUp(lenUnsigned)
+	rawUnsigned, _ := source.NextBytes(lenUnsigned)
+	temp := sha256.Sum256(rawUnsigned)
+	tx.hash = common.Uint256(sha256.Sum256(temp[:]))
+
+	// tx sigs
+	length, _, irregular, eof := source.NextVarUint()
+	if irregular {
+		return common.ErrIrregularData
+	}
+	if eof {
+		return io.ErrUnexpectedEOF
+	}
+	if length > constants.TX_MAX_SIG_SIZE {
+		return fmt.Errorf("transaction signature number %d execced %d", length, constants.TX_MAX_SIG_SIZE)
+	}
+
+	for i := 0; i < int(length); i++ {
+		var sig RawSig
+		err := sig.Deserialization(source)
+		if err != nil {
+			return err
+		}
+
+		tx.Sigs = append(tx.Sigs, sig)
+	}
+
+	pend := source.Pos()
+	lenAll := pend - pstart
+	if lenAll > MAX_TX_SIZE {
+		return fmt.Errorf("execced max transaction size:%d", lenAll)
+	}
+	source.BackUp(lenAll)
+	tx.Raw, _ = source.NextBytes(lenAll)
+
+	tx.nonDirectConstracted = true
+
+	return nil
+}
+
+// note: ownership transfered to output
+func (tx *Transaction) IntoMutable() (*MutableTransaction, error) {
+	mutable := &MutableTransaction{
+		Version:  tx.Version,
+		TxType:   tx.TxType,
+		Nonce:    tx.Nonce,
+		GasPrice: tx.GasPrice,
+		GasLimit: tx.GasLimit,
+		Payer:    tx.Payer,
+		Payload:  tx.Payload,
+	}
+
+	for _, raw := range tx.Sigs {
+		sig, err := raw.GetSig()
+		if err != nil {
+			return nil, err
+		}
+		mutable.Sigs = append(mutable.Sigs, sig)
+	}
+
+	return mutable, nil
+}
+
+func (tx *Transaction) deserializationUnsigned(source *common.ZeroCopySource) error {
+	var irregular, eof bool
+	tx.Version, eof = source.NextByte()
+	var txtype byte
+	txtype, eof = source.NextByte()
+	tx.TxType = TransactionType(txtype)
+	tx.Nonce, eof = source.NextUint32()
+	tx.GasPrice, eof = source.NextUint64()
+	tx.GasLimit, eof = source.NextUint64()
+	var buf []byte
+	buf, eof = source.NextBytes(common.ADDR_LEN)
+	if eof {
+		return io.ErrUnexpectedEOF
+	}
+	copy(tx.Payer[:], buf)
+
+	switch tx.TxType {
+	case Invoke:
+		pl := new(payload.InvokeCode)
+		err := pl.Deserialization(source)
+		if err != nil {
+			return err
+		}
+		tx.Payload = pl
+	case Deploy:
+		pl := new(payload.DeployCode)
+		err := pl.Deserialization(source)
+		if err != nil {
+			return err
+		}
+		tx.Payload = pl
+	default:
+		return fmt.Errorf("unsupported tx type %v", tx.Type())
+	}
+
+	var length uint64
+	length, _, irregular, eof = source.NextVarUint()
+	if irregular {
+		return common.ErrIrregularData
+	}
+	if eof {
+		return io.ErrUnexpectedEOF
+	}
+
+	if length != 0 {
+		return fmt.Errorf("transaction attribute must be 0, got %d", length)
+	}
+	tx.attributes = 0
+
+	return nil
+}
+
+type RawSig struct {
+	Invoke []byte
+	Verify []byte
+}
+
+func (self *RawSig) Serialization(sink *common.ZeroCopySink) error {
+	sink.WriteVarBytes(self.Invoke)
+	sink.WriteVarBytes(self.Verify)
+	return nil
+}
+
+func (self *RawSig) Serialize(w io.Writer) error {
+	err := serialization.WriteVarBytes(w, self.Invoke)
+	if err != nil {
+		return err
+	}
+	err = serialization.WriteVarBytes(w, self.Verify)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (self *RawSig) Deserialize(r io.Reader) error {
+	invoke, err := serialization.ReadVarBytes(r)
+	if err != nil {
+		return err
+	}
+	verify, err := serialization.ReadVarBytes(r)
+	if err != nil {
+		return err
+	}
+	self.Invoke = invoke
+	self.Verify = verify
+
+	return nil
+}
+
+func (self *RawSig) Deserialization(source *common.ZeroCopySource) error {
+	var eof, irregular bool
+	self.Invoke, _, irregular, eof = source.NextVarBytes()
+	if irregular {
+		return common.ErrIrregularData
+	}
+	self.Verify, _, irregular, eof = source.NextVarBytes()
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	if eof {
+		return io.ErrUnexpectedEOF
+	}
+
+	return nil
 }
 
 type Sig struct {
-	PubKeys []keypair.PublicKey
-	M       uint8
 	SigData [][]byte
+	PubKeys []keypair.PublicKey
+	M       uint16
 }
 
-func (self *Sig) Deserialize(r io.Reader) error {
-	n, err := serialization.ReadVarUint(r, 0)
-	if err != nil {
-		return err
+func (self *Sig) GetRawSig() (*RawSig, error) {
+	invocationScript := program.ProgramFromParams(self.SigData)
+	var verificationScript []byte
+	if len(self.PubKeys) == 0 {
+		return nil, errors.New("no pubkeys in sig")
+	} else if len(self.PubKeys) == 1 {
+		verificationScript = program.ProgramFromPubKey(self.PubKeys[0])
+	} else {
+		script, err := program.ProgramFromMultiPubKey(self.PubKeys, int(self.M))
+		if err != nil {
+			return nil, err
+		}
+		verificationScript = script
 	}
 
-	self.PubKeys = make([]keypair.PublicKey, n)
-	for i := 0; i < int(n); i++ {
-		buf, err := serialization.ReadVarBytes(r)
+	return &RawSig{Invoke: invocationScript, Verify: verificationScript}, nil
+}
+
+func (self *RawSig) GetSig() (Sig, error) {
+	sigs, err := program.GetParamInfo(self.Invoke)
+	if err != nil {
+		return Sig{}, err
+	}
+	info, err := program.GetProgramInfo(self.Verify)
+	if err != nil {
+		return Sig{}, err
+	}
+
+	return Sig{SigData: sigs, M: info.M, PubKeys: info.PubKeys}, nil
+}
+
+func (self *Sig) Serialization(sink *common.ZeroCopySink) error {
+	temp := common.NewZeroCopySink(nil)
+	program.EncodeParamProgramInto(temp, self.SigData)
+	sink.WriteVarBytes(temp.Bytes())
+
+	temp.Reset()
+	if len(self.PubKeys) == 0 {
+		return errors.New("no pubkeys in sig")
+	} else if len(self.PubKeys) == 1 {
+		program.EncodeSinglePubKeyProgramInto(temp, self.PubKeys[0])
+	} else {
+		err := program.EncodeMultiPubKeyProgramInto(temp, self.PubKeys, int(self.M))
 		if err != nil {
 			return err
 		}
-		self.PubKeys[i], err = keypair.DeserializePublicKey(buf)
-		if err != nil {
-			return err
-		}
 	}
-
-	self.M, err = serialization.ReadUint8(r)
-	if err != nil {
-		return err
-	}
-
-	m, err := serialization.ReadVarUint(r, 0)
-	if err != nil {
-		return err
-	}
-
-	self.SigData = make([][]byte, m)
-	for i := 0; i < int(m); i++ {
-		sig, err := serialization.ReadVarBytes(r)
-		if err != nil {
-			return err
-		}
-		self.SigData[i] = sig
-	}
+	sink.WriteVarBytes(temp.Bytes())
 
 	return nil
-}
-
-func (self *Transaction) GetSignatureAddresses() []common.Address {
-	address := make([]common.Address, 0, len(self.Sigs))
-	for _, sig := range self.Sigs {
-		m := int(sig.M)
-		n := len(sig.PubKeys)
-
-		if n == 1 {
-			address = append(address, AddressFromPubKey(sig.PubKeys[0]))
-		} else {
-			addr, _ := AddressFromMultiPubKeys(sig.PubKeys, m)
-			address = append(address, addr)
-		}
-	}
-
-	return address
 }
 
 func (self *Sig) Serialize(w io.Writer) error {
-	err := serialization.WriteVarUint(w, uint64(len(self.PubKeys)))
-	if err != nil {
-		return errors.New("serialize sig pubkey length failed")
-	}
-	for _, key := range self.PubKeys {
-		err := serialization.WriteVarBytes(w, keypair.SerializePublicKey(key))
+	invocationScript := program.ProgramFromParams(self.SigData)
+	var verificationScript []byte
+	if len(self.PubKeys) == 0 {
+		return errors.New("no pubkeys in sig")
+	} else if len(self.PubKeys) == 1 {
+		verificationScript = program.ProgramFromPubKey(self.PubKeys[0])
+	} else {
+		script, err := program.ProgramFromMultiPubKey(self.PubKeys, int(self.M))
 		if err != nil {
 			return err
 		}
+		verificationScript = script
 	}
-
-	err = serialization.WriteUint8(w, self.M)
+	err := serialization.WriteVarBytes(w, invocationScript)
 	if err != nil {
-		return errors.New("serialize Sig M failed")
+		return err
 	}
-
-	err = serialization.WriteVarUint(w, uint64(len(self.SigData)))
+	err = serialization.WriteVarBytes(w, verificationScript)
 	if err != nil {
-		return errors.New("serialize sig pubkey length failed")
-	}
-
-	for _, sig := range self.SigData {
-		err = serialization.WriteVarBytes(w, sig)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
 	return nil
 }
 
-type Fee struct {
-	Amount common.Fixed64
-	Payer  common.Address
+func (self *Sig) Deserialize(r io.Reader) error {
+	invocationScript, err := serialization.ReadVarBytes(r)
+	if err != nil {
+		return err
+	}
+	verificationScript, err := serialization.ReadVarBytes(r)
+	if err != nil {
+		return err
+	}
+	sigs, err := program.GetParamInfo(invocationScript)
+	if err != nil {
+		return err
+	}
+	info, err := program.GetProgramInfo(verificationScript)
+	if err != nil {
+		return err
+	}
+
+	self.SigData = sigs
+	self.M = info.M
+	self.PubKeys = info.PubKeys
+
+	return nil
+}
+
+func (self *Transaction) GetSignatureAddresses() ([]common.Address, error) {
+	if len(self.SignedAddr) == 0 {
+		addrs := make([]common.Address, 0, len(self.Sigs))
+		for _, prog := range self.Sigs {
+			addrs = append(addrs, common.AddressFromVmCode(prog.Verify))
+		}
+		self.SignedAddr = addrs
+	}
+	//if len(self.SignedAddr) != len(self.Sigs) {
+	//	return nil, errors.New("mismatched sigs and signed address")
+	//}
+	return self.SignedAddr, nil
 }
 
 type TransactionType byte
 
 const (
-	BookKeeping    TransactionType = 0x00
-	IssueAsset     TransactionType = 0x01
-	Bookkeeper     TransactionType = 0x02
-	Claim          TransactionType = 0x03
-	PrivacyPayload TransactionType = 0x20
-	RegisterAsset  TransactionType = 0x40
-	TransferAsset  TransactionType = 0x80
-	Record         TransactionType = 0x81
-	Deploy         TransactionType = 0xd0
-	Invoke         TransactionType = 0xd1
-	DataFile       TransactionType = 0x12
-	Enrollment     TransactionType = 0x04
-	Vote           TransactionType = 0x05
+	Bookkeeper TransactionType = 0x02
+	Deploy     TransactionType = 0xd0
+	Invoke     TransactionType = 0xd1
 )
-
-var TxName = map[TransactionType]string{
-	BookKeeping:    "Bookkeeping",
-	IssueAsset:     "IssueAsset",
-	Bookkeeper:     "Bookkeeper",
-	Claim:          "Claim",
-	PrivacyPayload: "PrivacyPayload",
-	RegisterAsset:  "RegisterAsset",
-	TransferAsset:  "TransferAsset",
-	Record:         "Record",
-	Deploy:         "Deploy",
-	Invoke:         "Invoke",
-	DataFile:       "DataFile",
-	Enrollment:     "Enrollment",
-	Vote:           "Vote",
-}
 
 // Payload define the func for loading the payload data
 // base on payload type which have different struture
 type Payload interface {
-
 	//Serialize payload data
 	Serialize(w io.Writer) error
 
 	Deserialize(r io.Reader) error
 }
 
+func (tx *Transaction) Serialization(sink *common.ZeroCopySink) error {
+	if tx.nonDirectConstracted == false || len(tx.Raw) == 0 {
+		panic("wrong constructed transaction")
+	}
+	sink.WriteBytes(tx.Raw)
+	return nil
+}
+
 // Serialize the Transaction
 func (tx *Transaction) Serialize(w io.Writer) error {
-
-	err := tx.SerializeUnsigned(w)
-	if err != nil {
-		return fmt.Errorf("Transaction txSerializeUnsigned Serialize failed: %s", err)
+	if tx.nonDirectConstracted == false || len(tx.Raw) == 0 {
+		panic("wrong constructed transaction")
 	}
-
-	err = serialization.WriteVarUint(w, uint64(len(tx.Sigs)))
-	if err != nil {
-		return fmt.Errorf("serialize tx sigs length failed: %s", err)
-	}
-	for _, sig := range tx.Sigs {
-		err = sig.Serialize(w)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (tx *Transaction) GetTotalFee() common.Fixed64 {
-	sum := common.Fixed64(0)
-	for _, fee := range tx.Fee {
-		sum += fee.Amount
-	}
-	return sum
-}
-
-//Serialize the Transaction data without contracts
-func (tx *Transaction) SerializeUnsigned(w io.Writer) error {
-	//txType
-	w.Write([]byte{byte(tx.Version), byte(tx.TxType)})
-	serialization.WriteUint32(w, tx.Nonce)
-	//Payload
-	if tx.Payload == nil {
-		return errors.New("Transaction Payload is nil.")
-	}
-	tx.Payload.Serialize(w)
-	//[]*txAttribute
-	err := serialization.WriteVarUint(w, uint64(len(tx.Attributes)))
-	if err != nil {
-		return fmt.Errorf("Transaction item txAttribute length serialization failed: %s", err)
-	}
-	for _, attr := range tx.Attributes {
-		attr.Serialize(w)
-	}
-
-	err = serialization.WriteVarUint(w, uint64(len(tx.Fee)))
-	if err != nil {
-		return fmt.Errorf("serialize tx fee length failed: %s", err)
-	}
-	for _, fee := range tx.Fee {
-		fee.Amount.Serialize(w)
-		fee.Payer.Serialize(w)
-	}
-
-	tx.NetWorkFee.Serialize(w)
-
-	return nil
-}
-
-// deserialize the Transaction
-func (tx *Transaction) Deserialize(r io.Reader) error {
-	// tx deserialize
-	err := tx.DeserializeUnsigned(r)
-	if err != nil {
-		return fmt.Errorf("transaction Deserialize error: %s", err)
-	}
-
-	// tx sigs
-	length, err := serialization.ReadVarUint(r, 0)
-	if err != nil {
-		return fmt.Errorf("transaction sigs deserialize error: %s", err)
-	}
-
-	tx.Sigs = make([]*Sig, 0, length)
-	for i := 0; i < int(length); i++ {
-		sig := new(Sig)
-		err := sig.Deserialize(r)
-		if err != nil {
-			return errors.New("deserialize transaction failed")
-		}
-		tx.Sigs = append(tx.Sigs, sig)
-	}
-
-	return nil
-}
-
-func (tx *Transaction) DeserializeUnsigned(r io.Reader) error {
-	var versiontype [2]byte
-	r.Read(versiontype[:])
-	nonce, err := serialization.ReadUint32(r)
-	if err != nil {
-		return err
-	}
-	tx.Version = versiontype[0]
-	tx.TxType = TransactionType(versiontype[1])
-	tx.Nonce = nonce
-
-	switch tx.TxType {
-	case Invoke:
-		tx.Payload = new(payload.InvokeCode)
-	case BookKeeping:
-		tx.Payload = new(payload.Bookkeeping)
-	case Deploy:
-		tx.Payload = new(payload.DeployCode)
-	default:
-		return fmt.Errorf("unsupported tx type %v", tx.Type())
-	}
-
-	err = tx.Payload.Deserialize(r)
-	if err != nil {
-		return fmt.Errorf("Payload Parse error: %s", err)
-	}
-
-	//attributes
-	length, err := serialization.ReadVarUint(r, 0)
-	if err != nil {
-		return err
-	}
-	for i := uint64(0); i < length; i++ {
-		attr := new(TxAttribute)
-		err = attr.Deserialize(r)
-		if err != nil {
-			return err
-		}
-		tx.Attributes = append(tx.Attributes, attr)
-	}
-
-	length, err = serialization.ReadVarUint(r, 0)
-	if err != nil {
-		return err
-	}
-	for i := uint64(0); i < length; i++ {
-		fee := new(Fee)
-		err = fee.Amount.Deserialize(r)
-		if err != nil {
-			return err
-		}
-		err = fee.Payer.Deserialize(r)
-		if err != nil {
-			return err
-		}
-		tx.Fee = append(tx.Fee, fee)
-	}
-	err = tx.NetWorkFee.Deserialize(r)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (tx *Transaction) GetMessage() []byte {
-	buf := new(bytes.Buffer)
-	tx.SerializeUnsigned(buf)
-	return buf.Bytes()
+	_, err := w.Write(tx.Raw)
+	return err
 }
 
 func (tx *Transaction) ToArray() []byte {
@@ -357,18 +414,7 @@ func (tx *Transaction) ToArray() []byte {
 }
 
 func (tx *Transaction) Hash() common.Uint256 {
-	if tx.hash == nil {
-		buf := bytes.Buffer{}
-		tx.SerializeUnsigned(&buf)
-		temp := sha256.Sum256(buf.Bytes())
-		f := common.Uint256(sha256.Sum256(temp[:]))
-		tx.hash = &f
-	}
-	return *tx.hash
-}
-
-func (tx *Transaction) SetHash(hash common.Uint256) {
-	tx.hash = &hash
+	return tx.hash
 }
 
 func (tx *Transaction) Type() common.InventoryType {
@@ -378,12 +424,4 @@ func (tx *Transaction) Type() common.InventoryType {
 func (tx *Transaction) Verify() error {
 	panic("unimplemented ")
 	return nil
-}
-
-func (tx *Transaction) GetSysFee() common.Fixed64 {
-	return common.Fixed64(config.Parameters.SystemFee[TxName[tx.TxType]])
-}
-
-func (tx *Transaction) GetNetworkFee() common.Fixed64 {
-	return tx.NetWorkFee
 }

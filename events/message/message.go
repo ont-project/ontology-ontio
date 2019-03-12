@@ -21,7 +21,6 @@ package message
 import (
 	"github.com/ontio/ontology/common"
 	"github.com/ontio/ontology/core/types"
-	"github.com/ontio/ontology/net/protocol"
 )
 
 const (
@@ -40,14 +39,10 @@ type NewInventoryMsg struct {
 	Inventory *common.Inventory
 }
 
-type NodeDisconnectMsg struct {
-	Node protocol.Noder
-}
-
-type NodeConsensusDisconnectMsg struct {
-	Node protocol.Noder
-}
-
 type SmartCodeEventMsg struct {
 	Event *types.SmartCodeEvent
+}
+
+type BlockConsensusComplete struct {
+	Block *types.Block
 }

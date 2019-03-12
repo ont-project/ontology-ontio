@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	"github.com/ontio/ontology/common"
+	"github.com/ontio/ontology/common/constants"
 	"github.com/ontio/ontology/common/log"
 	"github.com/ontio/ontology/core/ledger"
 	"github.com/ontio/ontology/core/payload"
@@ -35,7 +36,7 @@ import (
 func VerifyTransaction(tx *types.Transaction) ontErrors.ErrCode {
 	if err := checkTransactionSignatures(tx); err != nil {
 		log.Info("transaction verify error:", err)
-		return ontErrors.ErrTransactionContracts
+		return ontErrors.ErrVerifySignature
 	}
 
 	if err := checkTransactionPayload(tx); err != nil {
@@ -53,13 +54,24 @@ func VerifyTransactionWithLedger(tx *types.Transaction, ledger *ledger.Ledger) o
 
 func checkTransactionSignatures(tx *types.Transaction) error {
 	hash := tx.Hash()
+
+	lensig := len(tx.Sigs)
+	if lensig > constants.TX_MAX_SIG_SIZE {
+		return fmt.Errorf("transaction signature number %d execced %d", lensig, constants.TX_MAX_SIG_SIZE)
+	}
+
 	address := make(map[common.Address]bool, len(tx.Sigs))
-	for _, sig := range tx.Sigs {
+	for _, sigdata := range tx.Sigs {
+		sig, err := sigdata.GetSig()
+		if err != nil {
+			return err
+		}
+
 		m := int(sig.M)
 		kn := len(sig.PubKeys)
 		sn := len(sig.SigData)
 
-		if kn > 24 || sn < m || m > kn {
+		if kn > constants.MULTI_SIG_MAX_PUBKEY_SIZE || sn < m || m > kn || m <= 0 {
 			return errors.New("wrong tx sig param length")
 		}
 
@@ -75,17 +87,25 @@ func checkTransactionSignatures(tx *types.Transaction) error {
 				return err
 			}
 
-			addr, _ := types.AddressFromMultiPubKeys(sig.PubKeys, m)
+			addr, err := types.AddressFromMultiPubKeys(sig.PubKeys, m)
+			if err != nil {
+				return err
+			}
 			address[addr] = true
 		}
 	}
 
-	// check all payers in address
-	for _, fee := range tx.Fee {
-		if address[fee.Payer] == false {
-			return errors.New("signature missing for payer: " + common.ToHexString(fee.Payer[:]))
-		}
+	// check payer in address
+	if address[tx.Payer] == false {
+		return errors.New("signature missing for payer: " + tx.Payer.ToBase58())
 	}
+
+	addrList := make([]common.Address, 0, len(address))
+	for addr := range address {
+		addrList = append(addrList, addr)
+	}
+
+	tx.SignedAddr = addrList
 
 	return nil
 }
@@ -96,8 +116,6 @@ func checkTransactionPayload(tx *types.Transaction) error {
 	case *payload.DeployCode:
 		return nil
 	case *payload.InvokeCode:
-		return nil
-	case *payload.Bookkeeping:
 		return nil
 	default:
 		return errors.New(fmt.Sprint("[txValidator], unimplemented transaction payload type.", pld))

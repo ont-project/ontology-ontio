@@ -19,20 +19,25 @@
 package neovm
 
 import (
-	vm "github.com/ontio/ontology/vm/neovm"
-	"github.com/ontio/ontology/errors"
-	"github.com/ontio/ontology/core/types"
 	"github.com/ontio/ontology/core/payload"
+	"github.com/ontio/ontology/core/types"
+	"github.com/ontio/ontology/errors"
+	vm "github.com/ontio/ontology/vm/neovm"
 )
 
 func validatorAttribute(engine *vm.ExecutionEngine) error {
 	if vm.EvaluationStackCount(engine) < 1 {
 		return errors.NewErr("[validatorAttribute] Too few input parameters ")
 	}
-	d := vm.PeekInteropInterface(engine); if d == nil {
+	d, err := vm.PeekInteropInterface(engine)
+	if err != nil {
+		return err
+	}
+	if d == nil {
 		return errors.NewErr("[validatorAttribute] Pop txAttribute nil!")
 	}
-	_, ok := d.(*types.TxAttribute); if ok == false {
+	_, ok := d.(*types.TxAttribute)
+	if ok == false {
 		return errors.NewErr("[validatorAttribute] Wrong type!")
 	}
 	return nil
@@ -52,10 +57,16 @@ func validatorBlockTransaction(engine *vm.ExecutionEngine) error {
 	if vm.EvaluationStackCount(engine) < 2 {
 		return errors.NewErr("[validatorBlockTransaction] Too few input parameters ")
 	}
-	block, err := peekBlock(engine); if err != nil {
+	block, err := peekBlock(engine)
+	if err != nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[validatorBlockTransaction] Validate block fail!")
 	}
-	index := vm.PeekInt(engine); if index < 0 {
+	item, err := vm.PeekNBigInt(1, engine)
+	if err != nil {
+		return err
+	}
+	index := int(item.Int64())
+	if index < 0 {
 		return errors.NewErr("[validatorBlockTransaction] Pop index invalid!")
 	}
 	if index >= len(block.Transactions) {
@@ -96,7 +107,11 @@ func validatorHeader(engine *vm.ExecutionEngine) error {
 	if vm.EvaluationStackCount(engine) < 1 {
 		return errors.NewErr("[validatorHeader] Too few input parameters ")
 	}
-	item := vm.PeekInteropInterface(engine); if item == nil {
+	item, err := vm.PeekInteropInterface(engine)
+	if err != nil {
+		return err
+	}
+	if item == nil {
 		return errors.NewErr("[validatorHeader] Blockdata is nil!")
 	}
 	return nil
@@ -106,10 +121,15 @@ func validatorTransaction(engine *vm.ExecutionEngine) error {
 	if vm.EvaluationStackCount(engine) < 1 {
 		return errors.NewErr("[validatorTransaction] Too few input parameters ")
 	}
-	item := vm.PeekInteropInterface(engine); if item == nil {
+	item, err := vm.PeekInteropInterface(engine)
+	if err != nil {
+		return err
+	}
+	if item == nil {
 		return errors.NewErr("[validatorTransaction] Blockdata is nil!")
 	}
-	_, ok := item.(*types.Transaction); if !ok {
+	_, ok := item.(*types.Transaction)
+	if !ok {
 		return errors.NewErr("[validatorTransaction] Transaction wrong type!")
 	}
 	return nil
@@ -119,10 +139,15 @@ func validatorGetCode(engine *vm.ExecutionEngine) error {
 	if vm.EvaluationStackCount(engine) < 1 {
 		return errors.NewErr("[validatorGetCode] Too few input parameters ")
 	}
-	item := vm.PeekInteropInterface(engine); if item == nil {
+	item, err := vm.PeekInteropInterface(engine)
+	if err != nil {
+		return err
+	}
+	if item == nil {
 		return errors.NewErr("[validatorGetCode] Contract is nil!")
 	}
-	_, ok := item.(*payload.DeployCode); if !ok {
+	deploy, ok := item.(*payload.DeployCode)
+	if !ok || deploy == nil {
 		return errors.NewErr("[validatorGetCode] DeployCode wrong type!")
 	}
 	return nil
@@ -149,20 +174,38 @@ func validatorLog(engine *vm.ExecutionEngine) error {
 	return nil
 }
 
-func validatorCheckSig(engine *vm.ExecutionEngine) error {
-	if vm.EvaluationStackCount(engine) < 3 {
-		return errors.NewErr("[validatorCheckSig] Too few input parameters ")
+func validatorSerialize(engine *vm.ExecutionEngine) error {
+	if vm.EvaluationStackCount(engine) < 1 {
+		return errors.NewErr("[validatorSerialize] Too few input parameters ")
+	}
+	return nil
+}
+
+func validatorDeserialize(engine *vm.ExecutionEngine) error {
+	if vm.EvaluationStackCount(engine) < 1 {
+		return errors.NewErr("[validatorDeSerialize] Too few input parameters ")
+	}
+	return nil
+}
+
+func validatorContextAsReadOnly(engine *vm.ExecutionEngine) error {
+	if vm.EvaluationStackCount(engine) < 1 {
+		return errors.NewErr("[validatorContextAsReadOnly] Too few input parameters ")
 	}
 	return nil
 }
 
 func peekBlock(engine *vm.ExecutionEngine) (*types.Block, error) {
-	d := vm.PeekInteropInterface(engine); if d == nil {
+	d, err := vm.PeekInteropInterface(engine)
+	if err != nil {
+		return nil, err
+	}
+	if d == nil {
 		return nil, errors.NewErr("[Block] Pop blockdata nil!")
 	}
-	block, ok := d.(*types.Block); if !ok {
+	block, ok := d.(*types.Block)
+	if !ok {
 		return nil, errors.NewErr("[Block] Wrong type!")
 	}
 	return block, nil
 }
-

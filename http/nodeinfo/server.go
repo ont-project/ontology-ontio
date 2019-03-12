@@ -16,6 +16,7 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Package nodeinfo privides functions for nodeinfo server
 package nodeinfo
 
 import (
@@ -27,8 +28,7 @@ import (
 
 	"github.com/ontio/ontology/common/config"
 	"github.com/ontio/ontology/core/ledger"
-	"github.com/ontio/ontology/net/protocol"
-	"github.com/ontio/ontology-crypto/keypair"
+	p2p "github.com/ontio/ontology/p2pserver/net/protocol"
 )
 
 type Info struct {
@@ -40,7 +40,7 @@ type Info struct {
 	HttpWsPort    int
 	HttpJsonPort  int
 	HttpLocalPort int
-	NodePort      int
+	NodePort      uint16
 	NodeId        string
 	NodeType      string
 }
@@ -50,24 +50,24 @@ const (
 	SERVICENODE = "Service Node"
 )
 
-var node protocol.Noder
+var node p2p.P2P
 
 var templates = template.Must(template.New("info").Parse(TEMPLATE_PAGE))
 
-func newNgbNodeInfo(ngbId string, ngbType string, ngbAddr string, httpInfoAddr string, httpInfoPort int, httpInfoStart bool) *NgbNodeInfo {
+func newNgbNodeInfo(ngbId string, ngbType string, ngbAddr string, httpInfoAddr string, httpInfoPort uint16, httpInfoStart bool, ngbVersion string) *NgbNodeInfo {
 	return &NgbNodeInfo{NgbId: ngbId, NgbType: ngbType, NgbAddr: ngbAddr, HttpInfoAddr: httpInfoAddr,
-		HttpInfoPort: httpInfoPort, HttpInfoStart: httpInfoStart}
+		HttpInfoPort: httpInfoPort, HttpInfoStart: httpInfoStart, NgbVersion: ngbVersion}
 }
 
 func initPageInfo(blockHeight uint32, curNodeType string, ngbrCnt int, ngbrsInfo []NgbNodeInfo) (*Info, error) {
 	id := fmt.Sprintf("0x%x", node.GetID())
 	return &Info{NodeVersion: config.Version, BlockHeight: blockHeight,
 		NeighborCnt: ngbrCnt, Neighbors: ngbrsInfo,
-		HttpRestPort:  config.Parameters.HttpRestPort,
-		HttpWsPort:    config.Parameters.HttpWsPort,
-		HttpJsonPort:  config.Parameters.HttpJsonPort,
-		HttpLocalPort: config.Parameters.HttpLocalPort,
-		NodePort:      config.Parameters.NodePort,
+		HttpRestPort:  int(config.DefConfig.Restful.HttpRestPort),
+		HttpWsPort:    int(config.DefConfig.Ws.HttpWsPort),
+		HttpJsonPort:  int(config.DefConfig.Rpc.HttpJsonPort),
+		HttpLocalPort: int(config.DefConfig.Rpc.HttpLocalPort),
+		NodePort:      uint16(config.DefConfig.P2PNode.NodePort),
 		NodeId:        id, NodeType: curNodeType}, nil
 }
 
@@ -76,39 +76,25 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 	var ngbId string
 	var ngbAddr string
 	var ngbType string
-	var ngbInfoPort int
+	var ngbInfoPort uint16
 	var ngbInfoState bool
 	var ngbHttpInfoAddr string
+	var ngbVersion string
 
 	curNodeType := SERVICENODE
-	bookkeeperState, _ := ledger.DefLedger.GetBookkeeperState()
-	bookkeepers := bookkeeperState.CurrBookkeeper
-	bookkeeperLen := len(bookkeepers)
-	for i := 0; i < bookkeeperLen; i++ {
-		if keypair.ComparePublicKey(node.GetPubKey(), bookkeepers[i]) {
-			curNodeType = VERIFYNODE
-			break
-		}
-	}
 
-	ngbrNoders := node.GetNeighborNoder()
+	ngbrNoders := node.GetNeighbors()
 	ngbrsLen := len(ngbrNoders)
 	for i := 0; i < ngbrsLen; i++ {
 		ngbType = SERVICENODE
-		for j := 0; j < bookkeeperLen; j++ {
-			if keypair.ComparePublicKey(ngbrNoders[i].GetPubKey(), bookkeepers[j]) {
-				ngbType = VERIFYNODE
-				break
-			}
-		}
-
 		ngbAddr = ngbrNoders[i].GetAddr()
 		ngbInfoPort = ngbrNoders[i].GetHttpInfoPort()
 		ngbInfoState = ngbrNoders[i].GetHttpInfoState()
-		ngbHttpInfoAddr = ngbAddr + ":" + strconv.Itoa(ngbInfoPort)
+		ngbHttpInfoAddr = ngbAddr + ":" + strconv.Itoa(int(ngbInfoPort))
 		ngbId = fmt.Sprintf("0x%x", ngbrNoders[i].GetID())
+		ngbVersion = ngbrNoders[i].GetSoftVersion()
 
-		ngbrInfo := newNgbNodeInfo(ngbId, ngbType, ngbAddr, ngbHttpInfoAddr, ngbInfoPort, ngbInfoState)
+		ngbrInfo := newNgbNodeInfo(ngbId, ngbType, ngbAddr, ngbHttpInfoAddr, ngbInfoPort, ngbInfoState, ngbVersion)
 		ngbrNodersInfo = append(ngbrNodersInfo, *ngbrInfo)
 	}
 	sort.Sort(NgbNodeInfoSlice(ngbrNodersInfo))
@@ -126,9 +112,9 @@ func viewHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func StartServer(n protocol.Noder) {
+func StartServer(n p2p.P2P) {
 	node = n
-	port := int(config.Parameters.HttpInfoPort)
+	port := int(config.DefConfig.P2PNode.HttpInfoPort)
 	http.HandleFunc("/info", viewHandler)
 	http.ListenAndServe(":"+strconv.Itoa(port), nil)
 }

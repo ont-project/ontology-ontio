@@ -41,7 +41,7 @@ func getCurrentDirectory() string {
 }
 
 func GetNeighbor(params []interface{}) map[string]interface{} {
-	addr, _ := bactor.GetNeighborAddrs()
+	addr := bactor.GetNeighborAddrs()
 	return responseSuccess(addr)
 }
 
@@ -74,11 +74,8 @@ func GetNodeState(params []interface{}) map[string]interface{} {
 	if err != nil {
 		return responsePack(berr.INTERNAL_ERROR, false)
 	}
-	height, err := bactor.BlockHeight()
-	if err != nil {
-		return responsePack(berr.INTERNAL_ERROR, false)
-	}
-	txnCnt, err := bactor.GetTxnCnt()
+	height := bactor.GetCurrentBlockHeight()
+	txnCnt, err := bactor.GetTxnCount()
 	if err != nil {
 		return responsePack(berr.INTERNAL_ERROR, false)
 	}

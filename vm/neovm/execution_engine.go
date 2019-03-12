@@ -1,18 +1,20 @@
-// Copyright 2017 The Ontology Authors
-// This file is part of the Ontology library.
-//
-// The Ontology library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// The Ontology library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with the Ontology library. If not, see <http://www.gnu.org/licenses/>.
+/*
+ * Copyright (C) 2018 The ontology Authors
+ * This file is part of The ontology library.
+ *
+ * The ontology is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * The ontology is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 package neovm
 
@@ -36,15 +38,16 @@ type ExecutionEngine struct {
 	Contexts        []*ExecutionContext
 	Context         *ExecutionContext
 	OpCode          OpCode
+	OpExec          OpExec
 }
 
 func (this *ExecutionEngine) CurrentContext() *ExecutionContext {
-	return this.Contexts[len(this.Contexts) - 1]
+	return this.Contexts[len(this.Contexts)-1]
 }
 
 func (this *ExecutionEngine) PopContext() {
 	if len(this.Contexts) != 0 {
-		this.Contexts = this.Contexts[:len(this.Contexts) - 1]
+		this.Contexts = this.Contexts[:len(this.Contexts)-1]
 	}
 	if len(this.Contexts) != 0 {
 		this.Context = this.CurrentContext()
@@ -62,7 +65,8 @@ func (this *ExecutionEngine) Execute() error {
 		if this.State == FAULT || this.State == HALT || this.State == BREAK {
 			break
 		}
-		err := this.StepInto(); if err != nil {
+		err := this.StepInto()
+		if err != nil {
 			return err
 		}
 	}
@@ -70,7 +74,8 @@ func (this *ExecutionEngine) Execute() error {
 }
 
 func (this *ExecutionEngine) ExecuteCode() error {
-	code, err := this.Context.OpReader.ReadByte(); if err != nil {
+	code, err := this.Context.OpReader.ReadByte()
+	if err != nil {
 		this.State = FAULT
 		return err
 	}
@@ -78,9 +83,19 @@ func (this *ExecutionEngine) ExecuteCode() error {
 	return nil
 }
 
+func (this *ExecutionEngine) ValidateOp() error {
+	opExec := OpExecList[this.OpCode]
+	if opExec.Name == "" {
+		return errors.ERR_NOT_SUPPORT_OPCODE
+	}
+	this.OpExec = opExec
+	return nil
+}
+
 func (this *ExecutionEngine) StepInto() error {
-	state, err := this.ExecuteOp(); if err != nil {
-		this.State = state
+	state, err := this.ExecuteOp()
+	this.State = state
+	if err != nil {
 		return err
 	}
 	return nil
@@ -88,19 +103,18 @@ func (this *ExecutionEngine) StepInto() error {
 
 func (this *ExecutionEngine) ExecuteOp() (VMState, error) {
 	if this.OpCode >= PUSHBYTES1 && this.OpCode <= PUSHBYTES75 {
-		PushData(this, this.Context.OpReader.ReadBytes(int(this.OpCode)))
+		bs, err := this.Context.OpReader.ReadBytes(int(this.OpCode))
+		if err != nil {
+			return FAULT, err
+		}
+		PushData(this, bs)
 		return NONE, nil
 	}
 
-	opExec := OpExecList[this.OpCode]
-	if opExec.Exec == nil {
-		return FAULT, errors.ERR_NOT_SUPPORT_OPCODE
-	}
-
-	if opExec.Validator != nil {
-		if err := opExec.Validator(this); err != nil {
+	if this.OpExec.Validator != nil {
+		if err := this.OpExec.Validator(this); err != nil {
 			return FAULT, err
 		}
 	}
-	return opExec.Exec(this)
+	return this.OpExec.Exec(this)
 }

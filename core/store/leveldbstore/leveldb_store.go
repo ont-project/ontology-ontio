@@ -19,11 +19,13 @@
 package leveldbstore
 
 import (
+	"github.com/ethereum/go-ethereum/common/fdlimit"
 	"github.com/ontio/ontology/core/store/common"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
 	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/storage"
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
@@ -39,11 +41,21 @@ const BITSPERKEY = 10
 
 //NewLevelDBStore return LevelDBStore instance
 func NewLevelDBStore(file string) (*LevelDBStore, error) {
+	openFileCache := opt.DefaultOpenFilesCacheCapacity
+	maxOpenFiles, err := fdlimit.Current()
+	if err == nil && maxOpenFiles < openFileCache*5 {
+		openFileCache = maxOpenFiles / 5
+	}
+
+	if openFileCache < 16 {
+		openFileCache = 16
+	}
 
 	// default Options
 	o := opt.Options{
-		NoSync: false,
-		Filter: filter.NewBloomFilter(BITSPERKEY),
+		NoSync:                 false,
+		OpenFilesCacheCapacity: openFileCache,
+		Filter:                 filter.NewBloomFilter(BITSPERKEY),
 	}
 
 	db, err := leveldb.OpenFile(file, &o)
@@ -62,6 +74,24 @@ func NewLevelDBStore(file string) (*LevelDBStore, error) {
 	}, nil
 }
 
+func NewMemLevelDBStore() (*LevelDBStore, error) {
+	store := storage.NewMemStorage()
+	// default Options
+	o := opt.Options{
+		NoSync: false,
+		Filter: filter.NewBloomFilter(BITSPERKEY),
+	}
+	db, err := leveldb.Open(store, &o)
+	if err != nil {
+		return nil, err
+	}
+
+	return &LevelDBStore{
+		db:    db,
+		batch: nil,
+	}, nil
+}
+
 //Put a key-value pair to leveldb
 func (self *LevelDBStore) Put(key []byte, value []byte) error {
 	return self.db.Put(key, value, nil)
@@ -70,7 +100,13 @@ func (self *LevelDBStore) Put(key []byte, value []byte) error {
 //Get the value of a key from leveldb
 func (self *LevelDBStore) Get(key []byte) ([]byte, error) {
 	dat, err := self.db.Get(key, nil)
-	return dat, err
+	if err != nil {
+		if err == leveldb.ErrNotFound {
+			return nil, common.ErrNotFound
+		}
+		return nil, err
+	}
+	return dat, nil
 }
 
 //Has return whether the key is exist in leveldb
@@ -114,12 +150,10 @@ func (self *LevelDBStore) Close() error {
 	return err
 }
 
-//NewIterator return a iterator of leveldb with the key perfix
+//NewIterator return a iterator of leveldb with the key prefix
 func (self *LevelDBStore) NewIterator(prefix []byte) common.StoreIterator {
 
 	iter := self.db.NewIterator(util.BytesPrefix(prefix), nil)
 
-	return &Iterator{
-		iter: iter,
-	}
+	return iter
 }

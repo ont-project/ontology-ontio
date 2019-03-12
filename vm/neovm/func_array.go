@@ -27,16 +27,27 @@ import (
 func opArraySize(e *ExecutionEngine) (VMState, error) {
 	item := PopStackItem(e)
 	if _, ok := item.(*types.Array); ok {
-		PushData(e, len(item.GetArray()))
+		a, err := item.GetArray()
+		if err != nil {
+			return FAULT, err
+		}
+		PushData(e, len(a))
 	} else {
-		PushData(e, len(item.GetByteArray()))
+		b, err := item.GetByteArray()
+		if err != nil {
+			return FAULT, err
+		}
+		PushData(e, len(b))
 	}
 
 	return NONE, nil
 }
 
 func opPack(e *ExecutionEngine) (VMState, error) {
-	size := PopInt(e)
+	size, err := PopInt(e)
+	if err != nil {
+		return FAULT, err
+	}
 	var items []types.StackItems
 	for i := 0; i < size; i++ {
 		items = append(items, PopStackItem(e))
@@ -46,7 +57,10 @@ func opPack(e *ExecutionEngine) (VMState, error) {
 }
 
 func opUnpack(e *ExecutionEngine) (VMState, error) {
-	arr := PopArray(e)
+	arr, err := PopArray(e)
+	if err != nil {
+		return FAULT, err
+	}
 	l := len(arr)
 	for i := l - 1; i >= 0; i-- {
 		Push(e, arr[i])
@@ -56,25 +70,61 @@ func opUnpack(e *ExecutionEngine) (VMState, error) {
 }
 
 func opPickItem(e *ExecutionEngine) (VMState, error) {
-	index := PopInt(e)
-	items := PopArray(e)
-	PushData(e, items[index])
+	index := PopStackItem(e)
+	items := PopStackItem(e)
+
+	switch items.(type) {
+	case *types.Array:
+		bi, _ := index.GetBigInteger()
+		i := int(bi.Int64())
+		a, _ := items.GetArray()
+		PushData(e, a[i])
+	case *types.Struct:
+		bi, _ := index.GetBigInteger()
+		i := int(bi.Int64())
+		s, _ := items.GetStruct()
+		PushData(e, s[i])
+	case *types.Map:
+		PushData(e, items.(*types.Map).TryGetValue(index))
+	}
+
 	return NONE, nil
 }
 
 func opSetItem(e *ExecutionEngine) (VMState, error) {
 	newItem := PopStackItem(e)
 	if value, ok := newItem.(*types.Struct); ok {
-		newItem = value.Clone()
+		var err error
+		newItem, err = value.Clone()
+		if err != nil {
+			return FAULT, err
+		}
 	}
-	index := PopInt(e)
-	items := PopArray(e)
-	items[index] = newItem
+
+	index := PopStackItem(e)
+	item := PopStackItem(e)
+
+	switch item.(type) {
+	case *types.Map:
+		m := item.(*types.Map)
+		m.Add(index, newItem)
+	case *types.Array:
+		items, _ := item.GetArray()
+		bi, _ := index.GetBigInteger()
+		i := int(bi.Int64())
+		items[i] = newItem
+	case *types.Struct:
+		items, _ := item.GetStruct()
+		bi, _ := index.GetBigInteger()
+		i := int(bi.Int64())
+		items[i] = newItem
+	}
+
 	return NONE, nil
 }
 
 func opNewArray(e *ExecutionEngine) (VMState, error) {
-	count := PopInt(e)
+	count, _ := PopInt(e)
 	var items []types.StackItems
 	for i := 0; i < count; i++ {
 		items = append(items, types.NewBoolean(false))
@@ -84,7 +134,7 @@ func opNewArray(e *ExecutionEngine) (VMState, error) {
 }
 
 func opNewStruct(e *ExecutionEngine) (VMState, error) {
-	count := PopBigInt(e)
+	count, _ := PopBigInt(e)
 	var items []types.StackItems
 	for i := 0; count.Cmp(big.NewInt(int64(i))) > 0; i++ {
 		items = append(items, types.NewBoolean(false))
@@ -93,20 +143,42 @@ func opNewStruct(e *ExecutionEngine) (VMState, error) {
 	return NONE, nil
 }
 
+func opNewMap(e *ExecutionEngine) (VMState, error) {
+	PushData(e, types.NewMap())
+	return NONE, nil
+}
+
 func opAppend(e *ExecutionEngine) (VMState, error) {
 	newItem := PopStackItem(e)
 	if value, ok := newItem.(*types.Struct); ok {
-		newItem = value.Clone()
+		var err error
+		newItem, err = value.Clone()
+		if err != nil {
+			return FAULT, err
+		}
 	}
-	itemArr := PopArray(e)
-	itemArr = append(itemArr, newItem)
+	items := PopStackItem(e)
+	if item, ok := items.(*types.Array); ok {
+		item.Add(newItem)
+	}
+	if item, ok := items.(*types.Struct); ok {
+		item.Add(newItem)
+	}
 	return NONE, nil
 }
 
 func opReverse(e *ExecutionEngine) (VMState, error) {
-	itemArr := PopArray(e)
+	itemArr, _ := PopArray(e)
 	for i, j := 0, len(itemArr)-1; i < j; i, j = i+1, j-1 {
 		itemArr[i], itemArr[j] = itemArr[j], itemArr[i]
 	}
+	return NONE, nil
+}
+
+func opRemove(e *ExecutionEngine) (VMState, error) {
+	index := PopStackItem(e)
+	item := PopStackItem(e)
+	m := item.(*types.Map)
+	m.Remove(index)
 	return NONE, nil
 }

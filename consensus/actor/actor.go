@@ -25,6 +25,8 @@ import (
 	"github.com/ontio/ontology-eventbus/actor"
 	"github.com/ontio/ontology/core/types"
 	ontErrors "github.com/ontio/ontology/errors"
+	netActor "github.com/ontio/ontology/p2pserver/actor/server"
+	ptypes "github.com/ontio/ontology/p2pserver/message/types"
 	txpool "github.com/ontio/ontology/txnpool/common"
 )
 
@@ -66,8 +68,15 @@ type P2PActor struct {
 	P2P *actor.PID
 }
 
-func (self *P2PActor) Xmit(msg interface{}) {
+func (self *P2PActor) Broadcast(msg interface{}) {
 	self.P2P.Tell(msg)
+}
+
+func (self *P2PActor) Transmit(target uint64, msg ptypes.Message) {
+	self.P2P.Tell(&netActor.TransmitConsensusMsgReq{
+		Target: target,
+		Msg:    msg,
+	})
 }
 
 type LedgerActor struct {

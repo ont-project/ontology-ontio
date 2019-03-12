@@ -19,8 +19,11 @@
 package types
 
 import (
+	"bytes"
+	"fmt"
 	"math/big"
 
+	"github.com/ontio/ontology/common"
 	"github.com/ontio/ontology/vm/neovm/interfaces"
 )
 
@@ -35,49 +38,52 @@ func NewByteArray(value []byte) *ByteArray {
 }
 
 func (this *ByteArray) Equals(other StackItems) bool {
-	if _, ok := other.(*ByteArray); !ok {
-		return false
+	if this == other {
+		return true
 	}
+
 	a1 := this.value
-	a2 := other.GetByteArray()
-	l1 := len(a1)
-	l2 := len(a2)
-	if l1 != l2 {
+	a2, err := other.GetByteArray()
+	if err != nil {
 		return false
 	}
-	for i := 0; i < l1; i++ {
-		if a1[i] != a2[i] {
-			return false
-		}
-	}
-	return true
+
+	return bytes.Equal(a1, a2)
 }
 
-func (this *ByteArray) GetBigInteger() *big.Int {
-	return ConvertBytesToBigInteger(this.value)
+func (this *ByteArray) GetBigInteger() (*big.Int, error) {
+	return common.BigIntFromNeoBytes(this.value), nil
 }
 
-func (this *ByteArray) GetBoolean() bool {
+func (this *ByteArray) GetBoolean() (bool, error) {
 	for _, b := range this.value {
 		if b != 0 {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func (this *ByteArray) GetByteArray() []byte {
-	return this.value
+func (this *ByteArray) GetByteArray() ([]byte, error) {
+	return this.value, nil
 }
 
-func (this *ByteArray) GetInterface() interfaces.Interop {
-	return nil
+func (this *ByteArray) GetInterface() (interfaces.Interop, error) {
+	return nil, fmt.Errorf("%s", "Not support byte array to interface")
 }
 
-func (this *ByteArray) GetArray() []StackItems {
-	return []StackItems{this}
+func (this *ByteArray) GetArray() ([]StackItems, error) {
+	return nil, fmt.Errorf("%s", "Not support byte array to array")
 }
 
-func (this *ByteArray) GetStruct() []StackItems {
-	return []StackItems{this}
+func (this *ByteArray) GetStruct() ([]StackItems, error) {
+	return nil, fmt.Errorf("%s", "Not support byte array to struct")
+}
+
+func (this *ByteArray) GetMap() (map[StackItems]StackItems, error) {
+	return nil, fmt.Errorf("%s", "Not support byte array to map")
+}
+
+func (this *ByteArray) IsMapKey() bool {
+	return true
 }

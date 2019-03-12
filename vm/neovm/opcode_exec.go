@@ -61,18 +61,18 @@ var (
 		RET:      {Opcode: RET, Name: "RET", Exec: opRet},
 		APPCALL:  {Opcode: APPCALL, Name: "APPCALL"},
 		//TAILCALL: {Opcode: TAILCALL, Name: "TAILCALL", Exec: opAppCall},
-		SYSCALL:  {Opcode: SYSCALL, Name: "SYSCALL"},
+		SYSCALL: {Opcode: SYSCALL, Name: "SYSCALL"},
 
 		//Stack ops
-		DUPFROMALTSTACK: {Opcode: DUPFROMALTSTACK, Name: "DUPFROMALTSTACK", Exec: opToDupFromAltStack},
-		TOALTSTACK:      {Opcode: TOALTSTACK, Name: "TOALTSTACK", Exec: opToAltStack},
-		FROMALTSTACK:    {Opcode: FROMALTSTACK, Name: "FROMALTSTACK", Exec: opFromAltStack},
+		DUPFROMALTSTACK: {Opcode: DUPFROMALTSTACK, Name: "DUPFROMALTSTACK", Exec: opToDupFromAltStack, Validator: validateAltStackCount1},
+		TOALTSTACK:      {Opcode: TOALTSTACK, Name: "TOALTSTACK", Exec: opToAltStack, Validator: validateCount1},
+		FROMALTSTACK:    {Opcode: FROMALTSTACK, Name: "FROMALTSTACK", Exec: opFromAltStack, Validator: validateAltStackCount1},
 		XDROP:           {Opcode: XDROP, Name: "XDROP", Exec: opXDrop, Validator: validateXDrop},
 		XSWAP:           {Opcode: XSWAP, Name: "XSWAP", Exec: opXSwap, Validator: validateXSwap},
 		XTUCK:           {Opcode: XTUCK, Name: "XTUCK", Exec: opXTuck, Validator: validateXTuck},
 		DEPTH:           {Opcode: DEPTH, Name: "DEPTH", Exec: opDepth},
 		DROP:            {Opcode: DROP, Name: "DROP", Exec: opDrop, Validator: validateCount1},
-		DUP:             {Opcode: DUP, Name: "DUP", Exec: opDup},
+		DUP:             {Opcode: DUP, Name: "DUP", Exec: opDup, Validator: validateCount1},
 		NIP:             {Opcode: NIP, Name: "NIP", Exec: opNip, Validator: validateCount2},
 		OVER:            {Opcode: OVER, Name: "OVER", Exec: opOver, Validator: validateCount2},
 		PICK:            {Opcode: PICK, Name: "PICK", Exec: opPick, Validator: validatePick},
@@ -123,10 +123,11 @@ var (
 		WITHIN:      {Opcode: WITHIN, Name: "WITHIN", Exec: opWithIn, Validator: validateCount3},
 
 		//Crypto
-		SHA1:          {Opcode: SHA1, Name: "SHA1", Exec: opHash, Validator: validateCount1},
-		SHA256:        {Opcode: SHA256, Name: "SHA256", Exec: opHash, Validator: validateCount1},
-		HASH160:       {Opcode: HASH160, Name: "HASH160", Exec: opHash, Validator: validateCount1},
-		HASH256:       {Opcode: HASH256, Name: "HASH256", Exec: opHash, Validator: validateCount1},
+		SHA1:    {Opcode: SHA1, Name: "SHA1", Exec: opHash, Validator: validateCount1},
+		SHA256:  {Opcode: SHA256, Name: "SHA256", Exec: opHash, Validator: validateCount1},
+		HASH160: {Opcode: HASH160, Name: "HASH160", Exec: opHash, Validator: validateCount1},
+		HASH256: {Opcode: HASH256, Name: "HASH256", Exec: opHash, Validator: validateCount1},
+		VERIFY:  {Opcode: VERIFY, Name: "VERIFY"},
 		//CHECKSIG:      {Opcode: CHECKSIG, Name: "CHECKSIG", Exec: opCheckSig, Validator: validateCount2},
 		//CHECKMULTISIG: {Opcode: CHECKMULTISIG, Name: "CHECKMULTISIG", Exec: opCheckMultiSig, Validator: validateCount2},
 
@@ -137,9 +138,11 @@ var (
 		PICKITEM:  {Opcode: PICKITEM, Name: "PICKITEM", Exec: opPickItem, Validator: validatePickItem},
 		SETITEM:   {Opcode: SETITEM, Name: "SETITEM", Exec: opSetItem, Validator: validatorSetItem},
 		NEWARRAY:  {Opcode: NEWARRAY, Name: "NEWARRAY", Exec: opNewArray, Validator: validateNewArray},
+		NEWMAP:    {Opcode: NEWMAP, Name: "NEWMAP", Exec: opNewMap},
 		NEWSTRUCT: {Opcode: NEWSTRUCT, Name: "NEWSTRUCT", Exec: opNewStruct, Validator: validateNewStruct},
 		APPEND:    {Opcode: APPEND, Name: "APPEND", Exec: opAppend, Validator: validateAppend},
 		REVERSE:   {Opcode: REVERSE, Name: "REVERSE", Exec: opReverse, Validator: validatorReverse},
+		REMOVE:    {Opcode: REMOVE, Name: "REMOVE", Exec: opRemove, Validator: validatorRemove},
 
 		//Exceptions
 		THROW:      {Opcode: THROW, Name: "THROW", Exec: opThrow},

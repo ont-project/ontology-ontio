@@ -24,9 +24,16 @@ import (
 
 	"github.com/ontio/ontology-eventbus/actor"
 
+	"github.com/ontio/ontology/common"
+	"github.com/ontio/ontology/common/config"
 	"github.com/ontio/ontology/common/log"
+	"github.com/ontio/ontology/core/ledger"
 	tx "github.com/ontio/ontology/core/types"
+	"github.com/ontio/ontology/errors"
 	"github.com/ontio/ontology/events/message"
+	hComm "github.com/ontio/ontology/http/base/common"
+	"github.com/ontio/ontology/smartcontract/service/native/utils"
+	"github.com/ontio/ontology/smartcontract/service/neovm"
 	tc "github.com/ontio/ontology/txnpool/common"
 	"github.com/ontio/ontology/validator/types"
 )
@@ -53,6 +60,60 @@ func NewVerifyRspActor(s *TXPoolServer) *VerifyRspActor {
 	return a
 }
 
+// isBalanceEnough checks if the tranactor has enough to cover gas cost
+func isBalanceEnough(address common.Address, gas uint64) bool {
+	balance, err := hComm.GetContractBalance(0, utils.OngContractAddress, address)
+	if err != nil {
+		log.Debugf("failed to get contract balance %s err %v",
+			address.ToHexString(), err)
+		return false
+	}
+	return balance >= gas
+}
+
+func replyTxResult(txResultCh chan *tc.TxResult, hash common.Uint256,
+	err errors.ErrCode, desc string) {
+	result := &tc.TxResult{
+		Err:  err,
+		Hash: hash,
+		Desc: desc,
+	}
+	select {
+	case txResultCh <- result:
+	default:
+		log.Debugf("handleTransaction: duplicated result")
+	}
+}
+
+// preExecCheck checks whether preExec pass
+func preExecCheck(txn *tx.Transaction) (bool, string) {
+	result, err := ledger.DefLedger.PreExecuteContract(txn)
+	if err != nil {
+		log.Debugf("preExecCheck: failed to preExecuteContract tx %x err %v",
+			txn.Hash(), err)
+	}
+	if txn.GasLimit < result.Gas {
+		log.Debugf("preExecCheck: transaction's gasLimit %d is less than preExec gasLimit %d",
+			txn.GasLimit, result.Gas)
+		return false, fmt.Sprintf("transaction's gasLimit %d is less than preExec gasLimit %d",
+			txn.GasLimit, result.Gas)
+	}
+	gas, overflow := common.SafeMul(txn.GasPrice, result.Gas)
+	if overflow {
+		log.Debugf("preExecCheck: gasPrice %d preExec gasLimit %d overflow",
+			txn.GasPrice, result.Gas)
+		return false, fmt.Sprintf("gasPrice %d preExec gasLimit %d overflow",
+			txn.GasPrice, result.Gas)
+	}
+	if !isBalanceEnough(txn.Payer, gas) {
+		log.Debugf("preExecCheck: transactor %s has no balance enough to cover gas cost %d",
+			txn.Payer.ToHexString(), gas)
+		return false, fmt.Sprintf("transactor %s has no balance enough to cover gas cost %d",
+			txn.Payer.ToHexString(), gas)
+	}
+	return true, ""
+}
+
 // TxnActor: Handle the low priority msg from P2P and API
 type TxActor struct {
 	server *TXPoolServer
@@ -60,21 +121,82 @@ type TxActor struct {
 
 // handleTransaction handles a transaction from network and http
 func (ta *TxActor) handleTransaction(sender tc.SenderType, self *actor.PID,
-	txn *tx.Transaction) {
+	txn *tx.Transaction, txResultCh chan *tc.TxResult) {
 	ta.server.increaseStats(tc.RcvStats)
+	if len(txn.ToArray()) > tc.MAX_TX_SIZE {
+		log.Debugf("handleTransaction: reject a transaction due to size over 1M")
+		if sender == tc.HttpSender && txResultCh != nil {
+			replyTxResult(txResultCh, txn.Hash(), errors.ErrUnknown, "size is over 1M")
+		}
+		return
+	}
 
 	if ta.server.getTransaction(txn.Hash()) != nil {
-		log.Debug(fmt.Sprintf("Transaction %x already in the txn pool",
-			txn.Hash()))
+		log.Debugf("handleTransaction: transaction %x already in the txn pool",
+			txn.Hash())
 
 		ta.server.increaseStats(tc.DuplicateStats)
+		if sender == tc.HttpSender && txResultCh != nil {
+			replyTxResult(txResultCh, txn.Hash(), errors.ErrDuplicateInput,
+				fmt.Sprintf("transaction %x is already in the tx pool", txn.Hash()))
+		}
 	} else if ta.server.getTransactionCount() >= tc.MAX_CAPACITY {
-		log.Warn("Transaction pool is full", txn.Hash())
+		log.Debugf("handleTransaction: transaction pool is full for tx %x",
+			txn.Hash())
 
 		ta.server.increaseStats(tc.FailureStats)
+		if sender == tc.HttpSender && txResultCh != nil {
+			replyTxResult(txResultCh, txn.Hash(), errors.ErrTxPoolFull,
+				"transaction pool is full")
+		}
 	} else {
+		if _, overflow := common.SafeMul(txn.GasLimit, txn.GasPrice); overflow {
+			log.Debugf("handleTransaction: gasLimit %v, gasPrice %v overflow",
+				txn.GasLimit, txn.GasPrice)
+			if sender == tc.HttpSender && txResultCh != nil {
+				replyTxResult(txResultCh, txn.Hash(), errors.ErrUnknown,
+					fmt.Sprintf("gasLimit %d * gasPrice %d overflow",
+						txn.GasLimit, txn.GasPrice))
+			}
+			return
+		}
+
+		gasLimitConfig := config.DefConfig.Common.GasLimit
+		gasPriceConfig := ta.server.getGasPrice()
+		if txn.GasLimit < gasLimitConfig || txn.GasPrice < gasPriceConfig {
+			log.Debugf("handleTransaction: invalid gasLimit %v, gasPrice %v",
+				txn.GasLimit, txn.GasPrice)
+			if sender == tc.HttpSender && txResultCh != nil {
+				replyTxResult(txResultCh, txn.Hash(), errors.ErrUnknown,
+					fmt.Sprintf("Please input gasLimit >= %d and gasPrice >= %d",
+						gasLimitConfig, gasPriceConfig))
+			}
+			return
+		}
+
+		if txn.TxType == tx.Deploy && txn.GasLimit < neovm.CONTRACT_CREATE_GAS {
+			log.Debugf("handleTransaction: deploy tx invalid gasLimit %v, gasPrice %v",
+				txn.GasLimit, txn.GasPrice)
+			if sender == tc.HttpSender && txResultCh != nil {
+				replyTxResult(txResultCh, txn.Hash(), errors.ErrUnknown,
+					fmt.Sprintf("Deploy tx gaslimit should >= %d",
+						neovm.CONTRACT_CREATE_GAS))
+			}
+			return
+		}
+
+		if !ta.server.disablePreExec {
+			if ok, desc := preExecCheck(txn); !ok {
+				log.Debugf("handleTransaction: preExecCheck tx %x failed", txn.Hash())
+				if sender == tc.HttpSender && txResultCh != nil {
+					replyTxResult(txResultCh, txn.Hash(), errors.ErrUnknown, desc)
+				}
+				return
+			}
+			log.Debugf("handleTransaction: preExecCheck tx %x passed", txn.Hash())
+		}
 		<-ta.server.slots
-		ta.server.assignTxToWorker(txn, sender)
+		ta.server.assignTxToWorker(txn, sender, txResultCh)
 	}
 }
 
@@ -88,19 +210,19 @@ func (ta *TxActor) Receive(context actor.Context) {
 		log.Warn("txpool-tx actor stopping")
 
 	case *actor.Restarting:
-		log.Warn("txpool-tx actor Restarting")
+		log.Warn("txpool-tx actor restarting")
 
 	case *tc.TxReq:
 		sender := msg.Sender
 
-		log.Debug("txpool-tx actor Receives tx from ", sender.Sender())
+		log.Debugf("txpool-tx actor receives tx from %v ", sender.Sender())
 
-		ta.handleTransaction(sender, context.Self(), msg.Tx)
+		ta.handleTransaction(sender, context.Self(), msg.Tx, msg.TxResultCh)
 
 	case *tc.GetTxnReq:
 		sender := context.Sender()
 
-		log.Debug("txpool-tx actor Receives getting tx req from ", sender)
+		log.Debugf("txpool-tx actor receives getting tx req from %v", sender)
 
 		res := ta.server.getTransaction(msg.Hash)
 		if sender != nil {
@@ -111,7 +233,7 @@ func (ta *TxActor) Receive(context actor.Context) {
 	case *tc.GetTxnStats:
 		sender := context.Sender()
 
-		log.Debug("txpool-tx actor Receives getting tx stats from ", sender)
+		log.Debugf("txpool-tx actor receives getting tx stats from %v", sender)
 
 		res := ta.server.getStats()
 		if sender != nil {
@@ -122,7 +244,7 @@ func (ta *TxActor) Receive(context actor.Context) {
 	case *tc.CheckTxnReq:
 		sender := context.Sender()
 
-		log.Debug("txpool-tx actor Receives checking tx req from ", sender)
+		log.Debugf("txpool-tx actor receives checking tx req from %v", sender)
 
 		res := ta.server.checkTx(msg.Hash)
 		if sender != nil {
@@ -133,7 +255,7 @@ func (ta *TxActor) Receive(context actor.Context) {
 	case *tc.GetTxnStatusReq:
 		sender := context.Sender()
 
-		log.Debug("txpool-tx actor Receives getting tx status req from ", sender)
+		log.Debugf("txpool-tx actor receives getting tx status req from %v", sender)
 
 		res := ta.server.getTxStatusReq(msg.Hash)
 		if sender != nil {
@@ -146,8 +268,19 @@ func (ta *TxActor) Receive(context actor.Context) {
 			}
 		}
 
+	case *tc.GetTxnCountReq:
+		sender := context.Sender()
+
+		log.Debugf("txpool-tx actor receives getting tx count req from %v", sender)
+
+		res := ta.server.getTxCount()
+		if sender != nil {
+			sender.Request(&tc.GetTxnCountRsp{Count: res},
+				context.Self())
+		}
+
 	default:
-		log.Warn("txpool-tx actor: Unknown msg ", msg, "type", reflect.TypeOf(msg))
+		log.Debugf("txpool-tx actor: unknown msg %v type %v", msg, reflect.TypeOf(msg))
 	}
 }
 
@@ -175,7 +308,7 @@ func (tpa *TxPoolActor) Receive(context actor.Context) {
 	case *tc.GetTxnPoolReq:
 		sender := context.Sender()
 
-		log.Debug("txpool actor Receives getting tx pool req from ", sender)
+		log.Debugf("txpool actor receives getting tx pool req from %v", sender)
 
 		res := tpa.server.getTxPool(msg.ByCount, msg.Height)
 		if sender != nil {
@@ -185,7 +318,7 @@ func (tpa *TxPoolActor) Receive(context actor.Context) {
 	case *tc.GetPendingTxnReq:
 		sender := context.Sender()
 
-		log.Debug("txpool actor Receives getting pedning tx req from ", sender)
+		log.Debugf("txpool actor receives getting pedning tx req from %v", sender)
 
 		res := tpa.server.getPendingTxs(msg.ByCount)
 		if sender != nil {
@@ -195,21 +328,21 @@ func (tpa *TxPoolActor) Receive(context actor.Context) {
 	case *tc.VerifyBlockReq:
 		sender := context.Sender()
 
-		log.Debug("txpool actor Receives verifying block req from ", sender)
+		log.Debugf("txpool actor receives verifying block req from %v", sender)
 
 		tpa.server.verifyBlock(msg, sender)
 
 	case *message.SaveBlockCompleteMsg:
 		sender := context.Sender()
 
-		log.Debug("txpool actor Receives block complete event from ", sender)
+		log.Debugf("txpool actor receives block complete event from %v", sender)
 
 		if msg.Block != nil {
-			tpa.server.cleanTransactionList(msg.Block.Transactions)
+			tpa.server.cleanTransactionList(msg.Block.Transactions, msg.Block.Header.Height)
 		}
 
 	default:
-		log.Debug("txpool actor: Unknown msg ", msg, "type", reflect.TypeOf(msg))
+		log.Debugf("txpool actor: unknown msg %v type %v", msg, reflect.TypeOf(msg))
 	}
 }
 
@@ -249,7 +382,7 @@ func (vpa *VerifyRspActor) Receive(context actor.Context) {
 		vpa.server.assignRspToWorker(msg)
 
 	default:
-		log.Warn("txpool-verify actor:Unknown msg ", msg, "type", reflect.TypeOf(msg))
+		log.Debugf("txpool-verify actor:Unknown msg %v type %v", msg, reflect.TypeOf(msg))
 	}
 }
 

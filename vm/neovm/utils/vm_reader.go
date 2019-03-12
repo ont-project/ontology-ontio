@@ -35,51 +35,63 @@ func NewVmReader(b []byte) *VmReader {
 	return &vmreader
 }
 
-func (r *VmReader) Reader() *bytes.Reader {
-	return r.reader
-}
-
 func (r *VmReader) ReadByte() (byte, error) {
 	byte, err := r.reader.ReadByte()
 	return byte, err
 }
 
-func (r *VmReader) ReadBytes(count int) []byte {
+func (r *VmReader) ReadBytes(count int) ([]byte, error) {
 	b := make([]byte, count)
-	r.reader.Read(b)
-	return b
+	_, err := r.reader.Read(b)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
-func (r *VmReader) ReadUint16() uint16 {
-	b := r.ReadBytes(2)
-	return binary.LittleEndian.Uint16(b)
+func (r *VmReader) ReadBytesInto(b []byte) error {
+	_, err := r.reader.Read(b)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-func (r *VmReader) ReadUInt32() uint32 {
-	b := r.ReadBytes(4)
-	return binary.LittleEndian.Uint32(b)
+func (r *VmReader) ReadUint16() (uint16, error) {
+	var b [2]byte
+	err := r.ReadBytesInto(b[:])
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint16(b[:]), nil
 }
 
-func (r *VmReader) ReadUInt64() uint64 {
-	b := r.ReadBytes(8)
-	return binary.LittleEndian.Uint64(b)
+func (r *VmReader) ReadUint32() (uint32, error) {
+	var b [4]byte
+	err := r.ReadBytesInto(b[:])
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(b[:]), nil
 }
 
-func (r *VmReader) ReadInt16() int16 {
-	b := r.ReadBytes(2)
-	bytesBuffer := bytes.NewBuffer(b)
-	var vi int16
-	binary.Read(bytesBuffer, binary.LittleEndian, &vi)
-	return vi
-
+func (r *VmReader) ReadUint64() (uint64, error) {
+	var b [8]byte
+	err := r.ReadBytesInto(b[:])
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint64(b[:]), nil
 }
 
-func (r *VmReader) ReadInt32() int32 {
-	b := r.ReadBytes(4)
-	bytesBuffer := bytes.NewBuffer(b)
-	var vi int32
-	binary.Read(bytesBuffer, binary.LittleEndian, &vi)
-	return vi
+func (r *VmReader) ReadInt16() (int16, error) {
+	val, err := r.ReadUint16()
+	return int16(val), err
+}
+
+func (r *VmReader) ReadInt32() (int32, error) {
+	val, err := r.ReadUint32()
+	return int32(val), err
 }
 
 func (r *VmReader) Position() int {
@@ -94,32 +106,45 @@ func (r *VmReader) Seek(offset int64, whence int) (int64, error) {
 	return r.reader.Seek(offset, whence)
 }
 
-func (r *VmReader) ReadVarBytes(max int) []byte {
-	n := int(r.ReadVarInt(uint64(max)))
-	return r.ReadBytes(n)
+func (r *VmReader) ReadVarBytes(max uint32) ([]byte, error) {
+	n, err := r.ReadVarInt(uint64(max))
+	if err != nil {
+		return nil, err
+	}
+	return r.ReadBytes(int(n))
 }
 
-func (r *VmReader) ReadVarInt(max uint64) uint64 {
+func (r *VmReader) ReadVarInt(max uint64) (uint64, error) {
 	fb, _ := r.ReadByte()
 	var value uint64
+	var err error
 
 	switch fb {
 	case 0xFD:
-		value = uint64(r.ReadInt16())
+		val, e := r.ReadInt16()
+		value = uint64(val)
+		err = e
 	case 0xFE:
-		value = uint64(r.ReadUInt32())
+		val, e := r.ReadUint32()
+		value = uint64(val)
+		err = e
 	case 0xFF:
-		value = uint64(r.ReadUInt64())
+		val, e := r.ReadUint64()
+		value = uint64(val)
+		err = e
 	default:
 		value = uint64(fb)
 	}
-	if value > max {
-		return 0
+	if err != nil {
+		return 0, err
 	}
-	return value
+	if value > max {
+		return 0, nil
+	}
+	return value, nil
 }
 
-func (r *VmReader) ReadVarString() string {
-	bs := r.ReadVarBytes(0X7fffffc7)
-	return string(bs)
+func (r *VmReader) ReadVarString(maxlen uint32) (string, error) {
+	bs, err := r.ReadVarBytes(maxlen)
+	return string(bs), err
 }

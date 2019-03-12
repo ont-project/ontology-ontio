@@ -25,16 +25,18 @@ import (
 )
 
 const (
-	MAX_CAPACITY    = 100140                           // The tx pool's capacity that holds the verified txs
-	MAX_PENDING_TXN = 4096 * 10                        // The max length of pending txs
-	MAX_WORKER_NUM  = 2                                // The max concurrent workers
-	MAX_RCV_TXN_LEN = MAX_WORKER_NUM * MAX_PENDING_TXN // The max length of the queue that server can hold
-	MAX_RETRIES     = 0                                // The retry times to verify tx
-	EXPIRE_INTERVAL = 9                                // The timeout that verify tx
-	STATELESS_MASK  = 0x1                              // The mask of stateless validator
-	STATEFUL_MASK   = 0x2                              // The mask of stateful validator
-	VERIFY_MASK     = STATELESS_MASK | STATEFUL_MASK   // The mask that indicates tx valid
-	MAX_LIMITATION  = 10000                            // The length of pending tx from net and http
+	MAX_CAPACITY     = 100140                           // The tx pool's capacity that holds the verified txs
+	MAX_PENDING_TXN  = 4096 * 10                        // The max length of pending txs
+	MAX_WORKER_NUM   = 2                                // The max concurrent workers
+	MAX_RCV_TXN_LEN  = MAX_WORKER_NUM * MAX_PENDING_TXN // The max length of the queue that server can hold
+	MAX_RETRIES      = 0                                // The retry times to verify tx
+	EXPIRE_INTERVAL  = 9                                // The timeout that verify tx
+	STATELESS_MASK   = 0x1                              // The mask of stateless validator
+	STATEFUL_MASK    = 0x2                              // The mask of stateful validator
+	VERIFY_MASK      = STATELESS_MASK | STATEFUL_MASK   // The mask that indicates tx valid
+	MAX_LIMITATION   = 10000                            // The length of pending tx from net and http
+	UPDATE_FREQUENCY = 100                              // The frequency to update gas price from global params
+	MAX_TX_SIZE      = 1024 * 1024                      // The max size of a transaction to prevent DOS attacks
 )
 
 // ActorType enumerates the kind of actor
@@ -100,12 +102,18 @@ type TxStatus struct {
 	Hash  common.Uint256 // transaction hash
 	Attrs []*TXAttr      // transaction's status
 }
+type TxResult struct {
+	Err  errors.ErrCode
+	Hash common.Uint256
+	Desc string
+}
 
 // TxReq specifies the api that how to submit a new transaction.
 // Input: transacton and submitter type
 type TxReq struct {
-	Tx     *types.Transaction
-	Sender SenderType
+	Tx         *types.Transaction
+	Sender     SenderType
+	TxResultCh chan *TxResult
 }
 
 // TxRsp returns the result of submitting tx, including
@@ -162,6 +170,15 @@ type GetTxnStats struct {
 // GetTxnStatsRso returns the tx statistics.
 type GetTxnStatsRsp struct {
 	Count []uint64
+}
+
+// GetTxnCountReq specifies the api that how to get the tx count
+type GetTxnCountReq struct {
+}
+
+// GetTxnCountRsp returns current tx count, including pending, and verified
+type GetTxnCountRsp struct {
+	Count []uint32
 }
 
 // GetPendingTxnReq specifies the api that how to get a pending tx list
@@ -227,3 +244,11 @@ func (this LBSlice) Swap(i, j int) {
 func (this LBSlice) Less(i, j int) bool {
 	return this[i].Size < this[j].Size
 }
+
+type OrderByNetWorkFee []*TXEntry
+
+func (n OrderByNetWorkFee) Len() int { return len(n) }
+
+func (n OrderByNetWorkFee) Swap(i, j int) { n[i], n[j] = n[j], n[i] }
+
+func (n OrderByNetWorkFee) Less(i, j int) bool { return n[j].Tx.GasPrice < n[i].Tx.GasPrice }

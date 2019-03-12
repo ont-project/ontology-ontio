@@ -19,139 +19,104 @@
 package types
 
 import (
-	"bytes"
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/ontio/ontology/common"
-	"github.com/ontio/ontology/common/serialization"
 )
 
 type Block struct {
 	Header       *Header
 	Transactions []*Transaction
-
-	hash *common.Uint256
 }
 
-func (b *Block) Serialize(w io.Writer) error {
-	b.Header.Serialize(w)
-	err := serialization.WriteUint32(w, uint32(len(b.Transactions)))
-	if err != nil {
-		return fmt.Errorf("Block item Transactions length serialization failed: %s", err)
-	}
-
-	for _, transaction := range b.Transactions {
-		transaction.Serialize(w)
-	}
-	return nil
-}
-
-func (b *Block) Deserialize(r io.Reader) error {
-	if b.Header == nil {
-		b.Header = new(Header)
-	}
-	b.Header.Deserialize(r)
-
-	//Transactions
-	length, err := serialization.ReadUint32(r)
+func (b *Block) Serialization(sink *common.ZeroCopySink) error {
+	err := b.Header.Serialization(sink)
 	if err != nil {
 		return err
 	}
 
-	var tharray = make([]common.Uint256, 0, length)
+	sink.WriteUint32(uint32(len(b.Transactions)))
+	for _, transaction := range b.Transactions {
+		err := transaction.Serialization(sink)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// if no error, ownership of param raw is transfered to Transaction
+func BlockFromRawBytes(raw []byte) (*Block, error) {
+	source := common.NewZeroCopySource(raw)
+	block := &Block{}
+	err := block.Deserialization(source)
+	if err != nil {
+		return nil, err
+	}
+	return block, nil
+}
+
+func (self *Block) Deserialization(source *common.ZeroCopySource) error {
+	if self.Header == nil {
+		self.Header = new(Header)
+	}
+	err := self.Header.Deserialization(source)
+	if err != nil {
+		return err
+	}
+
+	length, eof := source.NextUint32()
+	if eof {
+		return io.ErrUnexpectedEOF
+	}
+
+	var hashes []common.Uint256
+	mask := make(map[common.Uint256]bool)
 	for i := uint32(0); i < length; i++ {
 		transaction := new(Transaction)
-		transaction.Deserialize(r)
+		// note currently all transaction in the block shared the same source
+		err := transaction.Deserialization(source)
+		if err != nil {
+			return err
+		}
 		txhash := transaction.Hash()
-		b.Transactions = append(b.Transactions, transaction)
-		tharray = append(tharray, txhash)
+		if mask[txhash] {
+			return errors.New("duplicated transaction in block")
+		}
+		mask[txhash] = true
+		hashes = append(hashes, txhash)
+		self.Transactions = append(self.Transactions, transaction)
 	}
 
-	b.Header.TransactionsRoot, err = common.ComputeMerkleRoot(tharray)
-	if err != nil {
-		return fmt.Errorf("Block Deserialize merkleTree compute failed: %s", err)
-	}
-
-	return nil
-}
-
-func (b *Block) Trim(w io.Writer) error {
-	b.Header.Serialize(w)
-	err := serialization.WriteUint32(w, uint32(len(b.Transactions)))
-	if err != nil {
-		return fmt.Errorf("Block item Transactions length serialization failed: %s", err)
-	}
-	for _, transaction := range b.Transactions {
-		temp := *transaction
-		hash := temp.Hash()
-		hash.Serialize(w)
-	}
-	return nil
-}
-
-func (b *Block) FromTrimmedData(r io.Reader) error {
-	if b.Header == nil {
-		b.Header = new(Header)
-	}
-	b.Header.Deserialize(r)
-
-	//Transactions
-	var i uint32
-	Len, err := serialization.ReadUint32(r)
-	if err != nil {
-		return err
-	}
-	var txhash common.Uint256
-	var tharray []common.Uint256
-	for i = 0; i < Len; i++ {
-		txhash.Deserialize(r)
-		transaction := new(Transaction)
-		transaction.SetHash(txhash)
-		b.Transactions = append(b.Transactions, transaction)
-		tharray = append(tharray, txhash)
-	}
-
-	b.Header.TransactionsRoot, err = common.ComputeMerkleRoot(tharray)
-	if err != nil {
-		return fmt.Errorf("Block Deserialize merkleTree compute failed: %s", err)
+	root := common.ComputeMerkleRoot(hashes)
+	if self.Header.TransactionsRoot != root {
+		return errors.New("mismatched transaction root")
 	}
 
 	return nil
 }
 
 func (b *Block) ToArray() []byte {
-	bf := new(bytes.Buffer)
-	b.Serialize(bf)
-	return bf.Bytes()
+	sink := common.NewZeroCopySink(nil)
+	b.Serialization(sink)
+	return sink.Bytes()
 }
 
 func (b *Block) Hash() common.Uint256 {
-	if b.hash == nil {
-		b.hash = new(common.Uint256)
-		*b.hash = b.Header.Hash()
-	}
-	return *b.hash
+	return b.Header.Hash()
 }
 
 func (b *Block) Type() common.InventoryType {
 	return common.BLOCK
 }
 
-func (b *Block) RebuildMerkleRoot() error {
+func (b *Block) RebuildMerkleRoot() {
 	txs := b.Transactions
-	transactionHashes := []common.Uint256{}
+	hashes := make([]common.Uint256, 0, len(txs))
 	for _, tx := range txs {
-		transactionHashes = append(transactionHashes, tx.Hash())
+		hashes = append(hashes, tx.Hash())
 	}
-	hash, err := common.ComputeMerkleRoot(transactionHashes)
-	if err != nil {
-		return fmt.Errorf("[Block] , RebuildMerkleRoot ComputeMerkleRoot failed: %s", err)
-	}
+	hash := common.ComputeMerkleRoot(hashes)
 	b.Header.TransactionsRoot = hash
-	return nil
-}
-
-func (bd *Block) SerializeUnsigned(w io.Writer) error {
-	return bd.Header.SerializeUnsigned(w)
 }

@@ -16,11 +16,12 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Package session privides websocket server manager sessionlist
 package session
 
 import (
-	"sync"
 	"errors"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
@@ -32,6 +33,7 @@ type SessionList struct {
 	mapOnlineList map[string]*Session //key is SessionId
 }
 
+// new websocket session list
 func NewSessionList() *SessionList {
 	return &SessionList{
 		mapOnlineList: make(map[string]*Session),

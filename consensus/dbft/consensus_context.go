@@ -21,15 +21,14 @@ package dbft
 import (
 	"fmt"
 
+	"github.com/ontio/ontology-crypto/keypair"
 	"github.com/ontio/ontology/account"
 	"github.com/ontio/ontology/common"
 	"github.com/ontio/ontology/common/log"
-	ser "github.com/ontio/ontology/common/serialization"
 	"github.com/ontio/ontology/core/ledger"
 	"github.com/ontio/ontology/core/types"
 	"github.com/ontio/ontology/core/vote"
-	msg "github.com/ontio/ontology/net/message"
-	"github.com/ontio/ontology-crypto/keypair"
+	msg "github.com/ontio/ontology/p2pserver/message/types"
 )
 
 const ContextVersion uint32 = 0
@@ -95,20 +94,13 @@ func (ctx *ConsensusContext) MakeChangeView() *msg.ConsensusPayload {
 }
 
 func (ctx *ConsensusContext) MakeHeader() *types.Block {
-	log.Debug()
-	if ctx.Transactions == nil {
-		return nil
-	}
 	if ctx.header == nil {
-		txHash := []common.Uint256{}
+		txHash := make([]common.Uint256, 0, len(ctx.Transactions))
 		for _, t := range ctx.Transactions {
 			txHash = append(txHash, t.Hash())
 		}
-		txRoot, err := common.ComputeMerkleRoot(txHash)
-		if err != nil {
-			return nil
-		}
-		blockRoot := ledger.DefLedger.GetBlockRootWithNewTxRoot(txRoot)
+		txRoot := common.ComputeMerkleRoot(txHash)
+		blockRoot := ledger.DefLedger.GetBlockRootWithNewTxRoots(ctx.Height, []common.Uint256{txRoot})
 		header := &types.Header{
 			Version:          ContextVersion,
 			PrevBlockHash:    ctx.PrevHash,
@@ -130,13 +122,15 @@ func (ctx *ConsensusContext) MakeHeader() *types.Block {
 func (ctx *ConsensusContext) MakePayload(message ConsensusMessage) *msg.ConsensusPayload {
 	log.Debug()
 	message.ConsensusMessageData().ViewNumber = ctx.ViewNumber
+	sink := common.NewZeroCopySink(nil)
+	message.Serialization(sink)
 	return &msg.ConsensusPayload{
 		Version:         ContextVersion,
 		PrevHash:        ctx.PrevHash,
 		Height:          ctx.Height,
 		BookkeeperIndex: uint16(ctx.BookkeeperIndex),
 		Timestamp:       ctx.Timestamp,
-		Data:            ser.ToArray(message),
+		Data:            sink.Bytes(),
 		Owner:           ctx.Owner,
 	}
 }

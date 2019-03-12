@@ -1,11 +1,11 @@
 
 <h1 align="center">Ontology </h1>
-<h4 align="center">Version 0.7.0 </h4>
+<h4 align="center">Version 1.0 </h4>
 
 [![GoDoc](https://godoc.org/github.com/ontio/ontology?status.svg)](https://godoc.org/github.com/ontio/ontology)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ontio/ontology)](https://goreportcard.com/report/github.com/ontio/ontology)
 [![Travis](https://travis-ci.org/ontio/ontology.svg?branch=master)](https://travis-ci.org/ontio/ontology)
-[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/ontio/ontology?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+[![Discord](https://img.shields.io/discord/102860784329052160.svg)](https://discord.gg/gDkuCAq)
 
 [English](README.md) | 中文
 
@@ -13,9 +13,10 @@
 
 Ontology致力于创建一个组件化、可自由配置、跨链支持、高性能、横向可扩展的区块链底层基础设施。 让部署及调用去中心化应用变得更加非常简单。
 
-目前代码还处于内部测试阶段，但处于快速的开发过程中，master代码可能是不稳定的，稳定的版本可以在releases中下载。
+Ontology MainNet 已经在2018年6月30日成功上线。<br>
+但很多新的功能还处于快速的开发过程中，master分支的代码可能是不稳定的，稳定的版本可以在[releases](https://github.com/ontio/ontology/releases)中下载。
 
-公开的测试网可以在下面找到，也非常欢迎及希望能有更多的开发者加入到Ontology中来。
+公开的主网和测试网都可以在下面找到，也非常欢迎及希望能有更多的开发者加入到Ontology中来。
 
 ## 特性
 
@@ -32,15 +33,17 @@ Ontology致力于创建一个组件化、可自由配置、跨链支持、高性
 
 * [构建开发环境](#构建开发环境)
 * [获取ontology](#获取ontology)
-    * [从源码获取](#从源码获取)
     * [从release获取](#从release获取)
-* [服务器部署](#服务器部署)
-    * [选择网络](#选择网络)
-        * [公开测试网Polaris同步节点部署](#公开测试网polaris同步节点部署)
-        * [单机部署配置](#单机部署配置)
-        * [多机部署配置](#多机部署配置)
-    * [运行](#运行)
+    * [从源码获取](#从源码获取)
+* [运行ontology](#运行ontology)
+    * [主网同步节点](#主网同步节点)
+    * [公开测试网Polaris同步节点](#公开测试网polaris同步节点)
+    * [测试模式](#测试模式)
+    * [使用docker运行](#使用docker运行)
+* [使用示例](#使用示例)
     * [ONT转账调用示例](#ont转账调用示例)
+	* [查询转账结果示例](#查询转账结果示例)
+	* [查询账户余额示例](#查询账户余额示例)
 * [贡献代码](#贡献代码)
 * [开源社区](#开源社区)
     * [网站](#网站)
@@ -56,6 +59,11 @@ Ontology致力于创建一个组件化、可自由配置、跨链支持、高性
 * Golang所支持的操作系统
 
 ## 获取ontology
+
+### 从release获取
+- 你可以通过命令 ` curl https://dev.ont.io/ontology_install | sh ` 获取最新的ontology版本
+- 你也可以从[下载页面](https://github.com/ontio/ontology/releases)获取.
+
 ### 从源码获取
 克隆ontology仓库到 **$GOPATH/src/github.com/ontio** 目录
 
@@ -74,160 +82,180 @@ $ cd $GOPATH/src/github.com/ontio/ontology
 $ glide install
 ````
 
+如果项目有新的第三方依赖包，使用glide更新依赖库
+
+````shell
+$ cd $GOPATH/src/github.com/ontio/ontology
+$ glide update
+````
+
 用make编译源码
 
 ```shell
-$ make
+$ make all
 ```
 
 成功编译后会生成两个可以执行程序
 
 * `ontology`: 节点程序/以命令行方式提供的节点控制程序
+* `tools/sigsvr`: (可选)签名服务 - sigsvr是一个签名服务的server以满足一些特殊的需求。详细的文档可以在[这里](./docs/specifications/sigsvr_CN.md)参考
 
-### 从release获取
-You can download at [release page](https://github.com/ontio/ontology/releases).
+## 运行ontology
 
-## 服务器部署
-### 选择网络
-ontology的运行支持以下3钟方式
+### 主网同步节点
 
-* 公开测试网Polaris同步节点部署
-* 单机部署
-* 多机部署
+直接启动Ontology
 
-#### 公开测试网Polaris同步节点部署
-1.创建钱包
-- 通过命令行程序，分别创建节点运行所需的钱包文件wallet.dat 
-    ```
-    $ .\ontology account add -d
-    use default value for all options
-    Enter a password for encrypting the private key:
-    Re-enter password:
-    
-    Create account successfully.
-    Address:  TA9TVuR4Ynn4VotfpExY5SaEy8a99obFPr
-    Public key: 120202a1cfbe3a0a04183d6c25ceff1e34957ace6e4899e4361c2e1a2bc3c817f90936
-    Signature scheme: SHA256withECDSA
-    ```
-    配置的例子如下：
-    - 目录结构
-    ```shell
-    $ tree
-    └── ontology
-        ├── ontology
-        └── wallet.dat
-    ```     
-    
-2.启动./ontology节点
-  * 不需要config.json文件，会使用默认配置启动节点
+   ```
+	./ontology
+   ```
+然后你可以连接上主网了。
 
-#### 单机部署配置
+### 公开测试网Polaris同步节点
+
+直接启动Ontology
+
+   ```
+	./ontology --networkid 2
+   ```
+然后你可以连接上公共测试网了。
+
+### 测试模式
 
 在单机上创建一个目录，在目录下存放以下文件：
-- 默认配置文件`config.json`
-- 节点程序 + 节点控制程序 `ontology`
-- 钱包文件`wallet.dat`
-把source根目录下的config-solo.config配置文件的内容复制到config.json内，修改Bookkeepers配置，替换钱包公钥，然后启动节点即可。钱包公钥可以使用`$ ./ontology wallet show --name=wallet.dat` 获取
+- 节点程序`ontology`
+- 钱包文件`wallet.dat` （注：`wallet.dat`可通过`./ontology account add -d`生成）
+
+使用命令 `$ ./ontology --testmode` 即可启动单机版的测试网络。
 
 单机配置的例子如下：
 - 目录结构
+
     ```shell
     $ tree
     └── node
-        ├── config.json
         ├── ontology
         └── wallet.dat
     ```
-- config.json中Bookkeepers的配置：
-    ```
-    "Bookkeepers": [ "1202021c6750d2c5d99813997438cee0740b04a73e42664c444e778e001196eed96c9d" ],
-    ```
 
-#### 多机部署配置
+### 使用docker运行
 
-网络环境下，最少需要4个节点（共识节点）完成部署。
-我们可以通过修改默认的配置文件`config.json`进行快速部署。
+请确保机器上已安装有docker环境。
 
-1. 将相关文件复制到目标主机，包括：
-    - 默认配置文件`config.json`
-    - 节点程序`ontology`
+1. 编译docker镜像
 
-2. 设置每个节点网络连接的端口号（推荐不做修改，使用默认端口配置）
-    - `NodePort`为的P2P连接端口号（默认20338）
-    - `HttpJsonPort`和`HttpLocalPort`为RPC端口号（默认为20336，20337）
+    - 在下载好的源码根目录下，运行`make docker`命令，这将编译好ontology的docker镜像
 
-3. 种子节点配置
-    - 在4个主机中选出至少一个做种子节点，并将种子节点地址分别填写到每个配置文件的`SeelList`中，格式为`种子节点IP地址 + 种子节点NodePort`
+2. 运行ontology镜像
 
-4. 创建钱包文件
-    - 通过命令行程序，在每个主机上分别创建节点运行所需的钱包文件wallet.dat 
-        ```
-        $ .\ontology account add -d
-        use default value for all options
-        Enter a password for encrypting the private key:
-        Re-enter password:
-        
-        Create account successfully.
-        Address:  TA9TVuR4Ynn4VotfpExY5SaEy8a99obFPr
-        Public key: 120202a1cfbe3a0a04183d6c25ceff1e34957ace6e4899e4361c2e1a2bc3c817f90936
-        Signature scheme: SHA256withECDSA
-        ```
+    - 使用命令`docker run ontio/ontology`运行ontology；
 
-5. 记账人配置
-    - 为每个节点创建钱包时会显示钱包的公钥信息，将所有节点的公钥信息分别填写到每个节点的配置文件的`Bookkeepers`项中
-    
-        注：每个节点的钱包公钥信息也可以通过命令行程序查看：
-    
-        ```
-        $ .\ontology account list -v
-        * 1     TA9TVuR4Ynn4VotfpExY5SaEy8a99obFPr
-                Signature algorithm: ECDSA
-                Curve: P-256
-                Key length: 256 bit
-                Public key: 120202a1cfbe3a0a04183d6c25ceff1e34957ace6e4899e4361c2e1a2bc3c817f90936 bit
-                Signature scheme: SHA256withECDSA
-        ```
+    - 如果需要使镜像运行时接受交互式键盘输入，则使用`docker run -ti ontio/ontology`命令启动镜像即可；
 
+    - 如果需要保留镜像每次运行时的数据，可以参考docker的数据持久化功能（例如 valume）；
 
-多机部署配置完成，每个节点目录结构如下
+    - 如果需要使用ontology参数，则在`docker run ontio/ontology`后面直接加参数即可，例如`docker run ontio/ontology --networkid 2`，具体的ontology命令
+    行参数可以参考[这里](./docs/specifications/cli_user_guide_CN.md)。
 
-```shell
-$ ls
-config.json ontology wallet.dat
-```
-
-一个配置文件片段可以参考根目录下的config-dbft.json文件。
-
-### 运行
-以任意顺序运行每个节点node程序，并在出现`Password:`提示后输入节点的钱包密码
-
-```shell
-$ ./ontology
-$ - 输入你的钱包口令
-```
-
-了解更多请运行 `./ontology --help`.
+## 使用示例
 
 ### ONT转账调用示例
-  contract:合约地址； - from: 转出地址； - to: 转入地址； - value: 资产转移数量；
+   - from: 转出地址； - to: 转入地址； - amount: 资产转移数量；
+      from参数可以不指定，如果不指定则使用默认账户。
+
 ```shell
-  .\ontology asset transfer --caddr=ff00000000000000000000000000000000000001 --value=500 --from  TA6nAAdX77wcsAnuBQxG61zXg3vJUAPpgk  --to TA6Hsjww86b9KBbXFyKEayMcVVafoTGH4K  --password=xxx
+  ./ontology asset transfer  --from=ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48 --to=AaCe8nVkMRABnp5YgEjYZ9E5KYCxks2uce --amount=10
 ```
-如果成功调用会返回如下event:
+
+执行完后会输出：
+
+```shell
+Transfer ONT
+  From:ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48
+  To:AaCe8nVkMRABnp5YgEjYZ9E5KYCxks2uce
+  Amount:10
+  TxHash:437bff5dee9a1894ad421d55b8c70a2b7f34c574de0225046531e32faa1f94ce
 ```
-[
-  {
-    "ContractAddress": "ff00000000000000000000000000000000000001",
-    "TxHash": "e0ba3d5807289eac243faceb1a2ac63e8dee4eba208ceac193b0bd606861b729",
-    "States": [
-      "transfer",
-      "TA6nAAdX77wcsAnuBQxG61zXg3vJUAPpgk",
-      "TA6Hsjww86b9KBbXFyKEayMcVVafoTGH4K",
-      500
-    ]
-  }
-]
+其中TxHash是转账交易的交易HASH，可以通过这个HASH查询转账交易的直接结果。
+出于区块链出块时间的限制，提交的转账请求不会马上执行，需要等待至少一个区块时间，等待记账节点打包交易。
+
+如果需要转ONG，可以使用参数 -- asset = ong。注意，ONT最少单位是1，而ONG则有9位小数点。
+
+```shell
+./ontology asset transfer --from=ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48 --to=ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48 --amount=95.479777254 --asset=ong
 ```
+执行完后会输出：
+
+```shell
+Transfer ONG
+  From:ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48
+  To:AaCe8nVkMRABnp5YgEjYZ9E5KYCxks2uce
+  Amount:95.479777254
+  TxHash:e4245d83607e6644c360b6007045017b5c5d89d9f0f5a9c3b37801018f789cc3
+```
+
+注意，Ontology cli中，所有用到账户的地址的地方，都支持账户索引和账户标签。账户索引是账户在钱包中的序号，从1开始。标签是可以在创建账户的时候指定一个唯一的别名。如：
+
+```shell
+./ontology asset transfer --from=1 --to=2 --amount=10
+```
+
+### 查询转账结果示例
+
+```shell
+./ontology info status <TxHash>
+```
+
+如：
+
+```shell
+./ontology info status e4245d83607e6644c360b6007045017b5c5d89d9f0f5a9c3b37801018f789cc3
+```
+
+查询结果：
+```shell
+Transaction states:
+{
+   "TxHash": "e4245d83607e6644c360b6007045017b5c5d89d9f0f5a9c3b37801018f789cc3",
+   "State": 1,
+   "GasConsumed": 0,
+   "Notify": [
+      {
+         "ContractAddress": "0200000000000000000000000000000000000000",
+         "States": [
+            "transfer",
+            "ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48",
+            "AaCe8nVkMRABnp5YgEjYZ9E5KYCxks2uce",
+            95479777254
+         ]
+      }
+   ]
+}
+```
+
+### 查询账户余额示例
+
+```shell
+./ontology asset balance <address|index|label>
+```
+如：
+
+```shell
+./ontology asset balance ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48
+```
+或者
+
+```shell
+./ontology asset balance 1
+```
+查询结果：
+```shell
+BalanceOf:ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48
+  ONT:989979697
+  ONG:28165900
+```
+
+进一步的示例可以参考[文档中心](https://ontio.github.io/documentation/)
 
 ## 贡献代码
 

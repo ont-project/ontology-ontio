@@ -1,23 +1,34 @@
 
 <h1 align="center">Ontology </h1>
-<h4 align="center">Version 0.7.0 </h4>
+<h4 align="center">Version 1.0 </h4>
 
 [![GoDoc](https://godoc.org/github.com/ontio/ontology?status.svg)](https://godoc.org/github.com/ontio/ontology)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ontio/ontology)](https://goreportcard.com/report/github.com/ontio/ontology)
 [![Travis](https://travis-ci.org/ontio/ontology.svg?branch=master)](https://travis-ci.org/ontio/ontology)
-[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/ontio/ontology?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+[![Discord](https://img.shields.io/discord/102860784329052160.svg)](https://discord.gg/gDkuCAq)
 
 English | [中文](README_CN.md)
 
-Welcome to Ontology's source code library!
+Welcome to the official source code repository for Ontology!
 
-Ontology is dedicated to creating a modularized, freely configurable, interoperable cross-chain, high-performance, and horizontally scalable blockchain infrastructure system. Ontology makes deploying and invoking decentralized applications easier.
+Ontology is dedicated to developing a high-performance blockchain infrastructure, which is customizable to different business requirements. 
 
-The code is currently alpha quality, but is in the process of rapid development. The master code may be unstable; stable versions can be downloaded in the release page.
+Prerequisites for getting started with development on the Ontology networks are:
 
-The public test network is described below. We sincerely welcome and hope more developers join Ontology.
+- Mainstream coding and development experience
+- Understanding of your business scenario/requirements
+- No need for previous blockchain engineering experience
 
-## Features
+The Ontology core tech team, the community, and the ecosystem can all support you in development. MainNet, TestNet, Docker image for Ontology, SmartX, and Ontology Explorer combined make it easy to start.
+
+Ontology makes getting started easier!
+
+Ontology MainNet has been launched on Jun 30, 2018. <br>
+And new features are still rapidly under development. The master branch may be unstable, but stable versions can be found under the [release page](https://github.com/ontio/ontology/releases).
+
+We openly welcome developers to Ontology.
+
+## Features 
 
 - Scalable lightweight universal smart contract
 - Scalable WASM contract support
@@ -31,22 +42,24 @@ The public test network is described below. We sincerely welcome and hope more d
 
 ## Contents
 
-* [Build development environment](#build-development-environment)
-* [Get Ontology](#get-ontology)
-	* [Get from source code](#get-from-source-code)
-	* [get from release](#get-from-release)
-* [Server deployment](#server-deployment)
-	* [Select network](#select-network)
-		* [Public test network Polaris sync node deployment](#public-test-network-polaris-sync-node-deployment)
-		* [Single-host deployment configuration](#single-host-deployment-configuration)
-		* [Multi-hosts deployment configuration](#multi-hosts-deployment-configuration)
-	* [Implement](#implement)
-	* [ONT transfer sample](#ont-transfer-sample)
-* [Contributions](#contributions)
-* [Open source community](#open-source-community)
-	* [Site](#site)
-	* [Developer Discord Group](#developer-discord-group)
-* [License](#license)
+- [Build development environment](#build-development-environment)
+- [Get Ontology](#get-ontology)
+    - [Get from release](#get-from-release)
+    - [Get from source code](#get-from-source-code)
+- [Run Ontology](#run-ontology)
+    - [MainNet sync node](#mainnet-sync-node)
+    - [Public test network Polaris sync node](#public-test-network-polaris-sync-node)
+    - [Testmode](#testmode)
+    - [Run in docker](#run-in-docker)
+- [Some examples](#some-example)
+    - [ONT transfer sample](#ont-transfer-sample)
+    - [Query transfer status sample](#query-transfer-status-sample)
+    - [Query account balance sample](#query-account-balance-sample)
+- [Contributions](#contributions)
+- [Open source community](#open-source-community)
+    - [Site](#site)
+    - [Developer Discord Group](#developer-discord-group)
+- [License](#license)
 
 ## Build development environment
 The requirements to build Ontology are:
@@ -57,6 +70,12 @@ The requirements to build Ontology are:
 - Golang supported operating system
 
 ## Get Ontology
+
+### Get from release
+- You can download the latest Ontology binary file with ` curl https://dev.ont.io/ontology_install | sh `.
+
+- You can download other versions at [release page](https://github.com/ontio/ontology/releases).
+
 ### Get from source code
 
 Clone the Ontology repository into the appropriate $GOPATH/src/github.com/ontio directory.
@@ -75,181 +94,196 @@ $ cd $GOPATH/src/github.com/ontio/ontology
 $ glide install
 ```
 
+If necessary, update dependent third party packages with glide.
+
+```
+$ cd $GOPATH/src/github.com/ontio/ontology
+$ glide update
+```
+
 Build the source code with make.
 
 ```
-$ make
+$ make all
 ```
 
 After building the source code sucessfully, you should see two executable programs:
 
-- `ontology`: the node program/command line program for node control
+- `ontology`: the node program/command line program for node control.
+- `tools/sigsvr`: (optional) Ontology Signature Server - sigsvr is a RPC server for signing transactions for some special requirements. Detailed docs can be found [here](https://github.com/ontio/documentation/blob/master/docs/pages/doc_en/Ontology/sigsvr_en.md).
 
-### get from release
-You can download at [release page](https://github.com/ontio/ontology/releases).
+## Run Ontology
 
-## Server deployment
-### Select network
-To run Ontology successfully,  nodes can be deployed by two ways:
+You can run Ontology in four different modes:
 
-- Public test network Polaris sync node deployment
-- Single-host deployment
-- Multi-hosts deployment
+1) MainNet (./ontology)
+2) TestNet (./ontology --networkid 2)
+3) Testmode (./ontology --testmode)
+4) Docker
 
-#### Public test network Polaris sync node deployment
-1.Create account
-- Through command line program, create wallet wallet.dat needed for node implementation.
-    ```
-    $ .\ontology account add -d
-    use default value for all options
-    Enter a password for encrypting the private key:
-    Re-enter password:
-    
-    Create account successfully.
-    Address:  TA9TVuR4Ynn4VotfpExY5SaEy8a99obFPr
-    Public key: 120202a1cfbe3a0a04183d6c25ceff1e34957ace6e4899e4361c2e1a2bc3c817f90936
-    Signature scheme: SHA256withECDSA
-    ```
-    Here's a example of host configuration:
+E.g. for Windows (64-bit), use command prompt and cd to the dirctory where you installed the Ontology release, then type `start ontology-windows-amd64.exe --networkid 2`. This will sync to TestNet and you can explore further by the help command `ontology-windows-amd64.exe --networkid 2 help`.
+
+### MainNet sync node
+
+Run ontology directly
+
+   ```
+	./ontology
+   ```
+then you can connect to Ontology MainNet.
+
+### Public test network Polaris sync node (TestNet)
+
+Run ontology directly
+
+   ```
+	./ontology --networkid 2
+   ```
    
-    Directory structure
-    ```shell
-    $ tree
-    └── ontology
-        ├── ontology
-        └── wallet.dat
-    ```        
-2.Start ontology  
-  PS: There is no need of config.json file, will use the default setting.
+Then you can connect to the Ontology TestNet.
 
-#### Single-host deployment configuration
+### Testmode
 
 Create a directory on the host and store the following files in the directory:
+- Node program `ontology`
+- Wallet file `wallet.dat` (`wallet.dat` can be generated by `./ontology account add -d`)
 
-- Default configuration file `config.json`
-- Node program + Node control program  `ontology`
-- Wallet file`wallet.dat`, copy the contents of the configuration file config-solo.config in the root directory to config.json and start the node.
-- Edit the config.json file and replace the bookkeeper entries with the public key of your wallet (created above). Use `$ ./ontology wallet show --name=wallet.dat` to get your public key.
+Run command `$ ./ontology --testmode` can start single-host testnet.
 
-Here's a example of single-host configuration:
+Here's a example of a single-host configuration:
 
 - Directory structure
+
     ```shell
     $ tree
     └── ontology
-        ├── config.json
         ├── ontology
         └── wallet.dat
     ```
 
-- Set bookkeepers in the config.json file:
-    ```shell
-    "Bookkeepers": [ "(public key of your account)1202021c6750d2c5d99813997438cee0740b04a73e42664c444e778e001196eed96c9d" ],
-    ```
+### Run in docker
 
-#### Multi-hosts deployment configuration
+Please ensure there is a docker environment in your machine.
 
-We can perform a quick deployment by modifying the default configuration file `config.json`.
+1. Make docker image
 
-1. Copy related file into target host, including:
+    - In the root directory of source code, run `make docker`, it will make an Ontology image in docker.
 
-   - Default configuration file`config.json`
-   - Node program`ontology`
+2. Run Ontology image
 
-2. Set the network connection port number for each node (recommend using the default port configuration, instead of modifying)
+    - Use command `docker run ontio/ontology` to run Ontology；
 
-   - `NodePort`is P2P connection port number (default: 20338)
-   - `HttpJsonPort` and `HttpLocalPort` are RPC port numbers (default: 20336, 20337)
+    - If you need to allow interactive keyboard input while the image is running, you can use the `docker run -ti ontio/ontology` command to start the image;
 
-3. Seed nodes configuration
+    - If you need to keep the data generated by image at runtime, you can refer to the data persistence function of docker (e.g. volume);
 
-   - Select at least one seed node out of 4 hosts and fill the seed node address into the `SeelList` of each configuration file. The format is `Seed node IP address + Seed node NodePort`.
+    - If you need to add Ontology parameters, you can add them directly after `docker run ontio/ontology` such as `docker run ontio/ontology --networkid 2`.
+     The parameters of ontology command line refer to [here](./docs/specifications/cli_user_guide.md).
 
-4. Create wallet file
-
-   - Through command line program, on each host create wallet wallet.dat needed for node implementation.
-        ```
-        $ .\ontology account add -d
-        use default value for all options
-        Enter a password for encrypting the private key:
-        Re-enter password:
-        
-        Create account successfully.
-        Address:  TA9TVuR4Ynn4VotfpExY5SaEy8a99obFPr
-        Public key: 120202a1cfbe3a0a04183d6c25ceff1e34957ace6e4899e4361c2e1a2bc3c817f90936
-        Signature scheme: SHA256withECDSA
-        ```
-
-5. Bookkeepers configuration
-
-   - While creating a wallet for each node, the public key information of the wallet will be displayed. Fill in the public key information of all nodes in the `Bookkeepers` field of each node's configuration file.
-
-     Note: The public key information for each node's wallet can also be viewed via the command line program:
-
-        ```
-        $ .\ontology account list -v
-        * 1     TA9TVuR4Ynn4VotfpExY5SaEy8a99obFPr
-                Signature algorithm: ECDSA
-                Curve: P-256
-                Key length: 256 bit
-                Public key: 120202a1cfbe3a0a04183d6c25ceff1e34957ace6e4899e4361c2e1a2bc3c817f90936 bit
-                Signature scheme: SHA256withECDSA
-        ```
-
-        Now multi-host configuration is completed, directory structure of each node is as follows:
-        ```
-        $ ls
-        config.json ontology wallet.dat
-        ```
-
-A configuration file fragment can refer to the config-dbft.json file in the root directory.
-
-### Implement
-
-Run each node program in any order and enter the node's wallet password after the `Password:` prompt appears.
-```
-$ ./ontology
-$ - Input your wallet password
-```
-
-Run `./ontology --help` for details.
+## Some examples
 
 ### ONT transfer sample
-contract:contract address； - from: transfer from； - to: transfer to； - value: amount；
+ -- from: transfer from； -- to: transfer to； -- amount: ONT amount；
 ```shell
-  .\ontology asset transfer --caddr=ff00000000000000000000000000000000000001 --value=500 --from  TA6nAAdX77wcsAnuBQxG61zXg3vJUAPpgk  --to TA6Hsjww86b9KBbXFyKEayMcVVafoTGH4K  --password=xxx
+ ./ontology asset transfer  --from=ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48 --to=AaCe8nVkMRABnp5YgEjYZ9E5KYCxks2uce --amount=10
 ```
-If transfer asset successd, the result will show as follow:
+If the asset transfer is successful, the result will display as follows:
+
+```shell
+Transfer ONT
+  From:ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48
+  To:AaCe8nVkMRABnp5YgEjYZ9E5KYCxks2uce
+  Amount:10
+  TxHash:437bff5dee9a1894ad421d55b8c70a2b7f34c574de0225046531e32faa1f94ce
 ```
-[
-  {
-    "ContractAddress": "ff00000000000000000000000000000000000001",
-    "TxHash": "e0ba3d5807289eac243faceb1a2ac63e8dee4eba208ceac193b0bd606861b729",
-    "States": [
-      "transfer",
-      "TA6nAAdX77wcsAnuBQxG61zXg3vJUAPpgk",
-      "TA6Hsjww86b9KBbXFyKEayMcVVafoTGH4K",
-      500
-    ]
-  }
-]
+TxHash is the transfer transaction hash, and we can query a transfer result by the TxHash.
+Due to block time, the transfer transaction will not be executed before the block is generated and added.
+
+If you want to transfer ONG, just add --asset=ong flag.
+
+Note that ONT is an integer and has no decimals, whereas ONG has 9 decimals. For detailed info please read [Everything you need to know about ONG](https://medium.com/ontologynetwork/everything-you-need-to-know-about-ong-582ed216b870).
+
+```shell
+./ontology asset transfer --from=ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48 --to=ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48 --amount=95.479777254 --asset=ong
 ```
+If transfer of the asset succeeds, the result will display as follows:
+
+```shell
+Transfer ONG
+  From:ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48
+  To:AaCe8nVkMRABnp5YgEjYZ9E5KYCxks2uce
+  Amount:95.479777254
+  TxHash:e4245d83607e6644c360b6007045017b5c5d89d9f0f5a9c3b37801018f789cc3
+```
+
+Please note, when you use the address of an account, you can use the index or label of the account instead. Index is the sequence number of a particular account in the wallet. The index starts from 1, and the label is the unique alias of an account in the wallet.
+
+```shell
+./ontology asset transfer --from=1 --to=2 --amount=10
+```
+
+### Query transfer status sample
+
+```shell
+./ontology info status <TxHash>
+```
+
+For Example:
+
+```shell
+./ontology info status 10dede8b57ce0b272b4d51ab282aaf0988a4005e980d25bd49685005cc76ba7f
+```
+
+Result:
+
+```shell
+Transaction:transfer success
+From:AXkDGfr9thEqWmCKpTtQYaazJRwQzH48eC
+To:AYiToLDT2yZuNs3PZieXcdTpyC5VWQmfaN
+Amount:10
+```
+
+### Query account balance sample
+
+```shell
+./ontology asset balance <address|index|label>
+```
+
+For Example:
+
+```shell
+./ontology asset balance ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48
+```
+
+or
+
+```shell
+./ontology asset balance 1
+```
+Result:
+```shell
+BalanceOf:ARVVxBPGySL56CvSSWfjRVVyZYpNZ7zp48
+  ONT:989979697
+  ONG:28165900
+```
+
+For further examples, please refer to the [CLI User Guide](https://ontio.github.io/documentation/cli_user_guide_en.html).
 
 ## Contributions
 
-Please open a pull request with a signed commit. We appreciate your help! You can also send your code as emails to the developer mailing list. You're welcome to join the Ontology mailing list or developer forum.
+Please open a pull request with a signed commit. We appreciate your help! You can also send your code as email to the developer mailing list. You're welcome to join the Ontology mailing list or developer forum.
 
-Please provide detailed submission information when you want to contribute code for this project. The format is as follows:
+Please provide a detailed submission information when you want to contribute code for this project. The format is as follows:
 
-Header line: explain the commit in one line (use the imperative).
+Header line: Explain the commit in one line (use the imperative).
 
-Body of commit message is a few lines of text, explaining things  in more detail, possibly giving some background about the issue  being fixed, etc.
+Body of commit message is a few lines of text, explaining things in more detail, possibly giving some background about the issue being fixed, etc.
 
 The body of the commit message can be several paragraphs. Please do proper word-wrap and keep columns shorter than 74 characters or so. That way "git log" will show things  nicely even when it is indented.
 
-Make sure you explain your solution and why you are doing what you are  doing, as opposed to describing what you are doing. Reviewers and your  future self can read the patch, but might not understand why a  particular solution was implemented.
+Make sure you explain your solution and why you are doing what you are doing, as opposed to describing what you are doing. Reviewers and your future self can read the patch, but might not understand why a particular solution was implemented.
 
-Reported-by: whoever-reported-it &
+Reported-by: whoever-reported-it +
 Signed-off-by: Your Name [youremail@yourhost.com](mailto:youremail@yourhost.com)
 
 ## Open source community

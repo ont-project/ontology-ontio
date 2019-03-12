@@ -47,6 +47,11 @@ const (
 	ErrNoAccount            ErrCode = 45014
 	ErrRetryExhausted       ErrCode = 45015
 	ErrTxPoolFull           ErrCode = 45016
+	ErrNetPackFail          ErrCode = 45017
+	ErrNetUnPackFail        ErrCode = 45018
+	ErrNetVerifyFail        ErrCode = 45019
+	ErrGasPrice             ErrCode = 45020
+	ErrVerifySignature      ErrCode = 45021
 )
 
 func (err ErrCode) Error() string {
@@ -85,6 +90,17 @@ func (err ErrCode) Error() string {
 		return "retry exhausted"
 	case ErrTxPoolFull:
 		return "tx pool full"
+	case ErrNetPackFail:
+		return "net msg pack fail"
+	case ErrNetUnPackFail:
+		return "net msg unpack fail"
+	case ErrNetVerifyFail:
+		return "net msg verify fail"
+	case ErrGasPrice:
+		return "invalid gas price"
+	case ErrVerifySignature:
+		return "transaction verify signature fail"
+
 	}
 
 	return fmt.Sprintf("Unknown error? Error code = %d", err)

@@ -19,62 +19,97 @@
 package neovm
 
 import (
-	"bytes"
-
-	vm "github.com/ontio/ontology/vm/neovm"
-	scommon "github.com/ontio/ontology/core/store/common"
-	"github.com/ontio/ontology/errors"
-	"github.com/ontio/ontology/core/states"
+	"fmt"
 	"github.com/ontio/ontology/common"
+	"github.com/ontio/ontology/core/states"
+	"github.com/ontio/ontology/errors"
+	vm "github.com/ontio/ontology/vm/neovm"
 )
 
 // StoragePut put smart contract storage item to cache
 func StoragePut(service *NeoVmService, engine *vm.ExecutionEngine) error {
-	context, err := getContext(engine); if err != nil {
+	if vm.EvaluationStackCount(engine) < 3 {
+		return errors.NewErr("[Context] Too few input parameters ")
+	}
+	context, err := getContext(engine)
+	if err != nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[StoragePut] get pop context error!")
+	}
+	if context.IsReadOnly {
+		return fmt.Errorf("%s", "[StoragePut] storage read only!")
 	}
 	if err := checkStorageContext(service, context); err != nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[StoragePut] check context error!")
 	}
 
-	key := vm.PopByteArray(engine)
+	key, err := vm.PopByteArray(engine)
+	if err != nil {
+		return err
+	}
 	if len(key) > 1024 {
 		return errors.NewErr("[StoragePut] Storage key to long")
 	}
 
-	value := vm.PopByteArray(engine)
-	service.CloneCache.Add(scommon.ST_STORAGE, getStorageKey(context.address, key), &states.StorageItem{Value: value})
+	value, err := vm.PopByteArray(engine)
+	if err != nil {
+		return err
+	}
+
+	service.CacheDB.Put(genStorageKey(context.Address, key), states.GenRawStorageItem(value))
 	return nil
 }
 
 // StorageDelete delete smart contract storage item from cache
 func StorageDelete(service *NeoVmService, engine *vm.ExecutionEngine) error {
-	context, err := getContext(engine); if err != nil {
+	if vm.EvaluationStackCount(engine) < 2 {
+		return errors.NewErr("[Context] Too few input parameters ")
+	}
+	context, err := getContext(engine)
+	if err != nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[StorageDelete] get pop context error!")
+	}
+	if context.IsReadOnly {
+		return fmt.Errorf("%s", "[StorageDelete] storage read only!")
 	}
 	if err := checkStorageContext(service, context); err != nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[StorageDelete] check context error!")
 	}
-
-	service.CloneCache.Delete(scommon.ST_STORAGE, getStorageKey(context.address, vm.PopByteArray(engine)))
+	ba, err := vm.PopByteArray(engine)
+	if err != nil {
+		return err
+	}
+	service.CacheDB.Delete(genStorageKey(context.Address, ba))
 
 	return nil
 }
 
 // StorageGet push smart contract storage item from cache to vm stack
 func StorageGet(service *NeoVmService, engine *vm.ExecutionEngine) error {
-	context, err := getContext(engine); if err != nil {
+	if vm.EvaluationStackCount(engine) < 2 {
+		return errors.NewErr("[Context] Too few input parameters ")
+	}
+	context, err := getContext(engine)
+	if err != nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[StorageGet] get pop context error!")
 	}
-
-	item, err := service.CloneCache.Get(scommon.ST_STORAGE, getStorageKey(context.address, vm.PopByteArray(engine))); if err != nil {
+	ba, err := vm.PopByteArray(engine)
+	if err != nil {
 		return err
 	}
 
-	if item == nil {
+	raw, err := service.CacheDB.Get(genStorageKey(context.Address, ba))
+	if err != nil {
+		return err
+	}
+
+	if len(raw) == 0 {
 		vm.PushData(engine, []byte{})
 	} else {
-		vm.PushData(engine, item.(*states.StorageItem).Value)
+		value, err := states.GetValueFromRawStorageItem(raw)
+		if err != nil {
+			return err
+		}
+		vm.PushData(engine, value)
 	}
 	return nil
 }
@@ -85,8 +120,15 @@ func StorageGetContext(service *NeoVmService, engine *vm.ExecutionEngine) error 
 	return nil
 }
 
+func StorageGetReadOnlyContext(service *NeoVmService, engine *vm.ExecutionEngine) error {
+	context := NewStorageContext(service.ContextRef.CurrentContext().ContractAddress)
+	context.IsReadOnly = true
+	vm.PushData(engine, context)
+	return nil
+}
+
 func checkStorageContext(service *NeoVmService, context *StorageContext) error {
-	item, err := service.CloneCache.Get(scommon.ST_CONTRACT, context.address[:])
+	item, err := service.CacheDB.GetContract(context.Address)
 	if err != nil || item == nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[CheckStorageContext] get context fail!")
 	}
@@ -94,22 +136,23 @@ func checkStorageContext(service *NeoVmService, context *StorageContext) error {
 }
 
 func getContext(engine *vm.ExecutionEngine) (*StorageContext, error) {
-	if vm.EvaluationStackCount(engine) < 2 {
-		return nil, errors.NewErr("[Context] Too few input parameters ")
+	opInterface, err := vm.PopInteropInterface(engine)
+	if err != nil {
+		return nil, err
 	}
-	opInterface := vm.PopInteropInterface(engine); if opInterface == nil {
+	if opInterface == nil {
 		return nil, errors.NewErr("[Context] Get storageContext nil")
 	}
-	context, ok := opInterface.(*StorageContext); if !ok {
+	context, ok := opInterface.(*StorageContext)
+	if !ok {
 		return nil, errors.NewErr("[Context] Get storageContext invalid")
 	}
 	return context, nil
 }
 
-func getStorageKey(codeHash common.Address, key []byte) []byte {
-	buf := bytes.NewBuffer(nil)
-	buf.Write(codeHash[:])
-	buf.Write(key)
-	return buf.Bytes()
+func genStorageKey(address common.Address, key []byte) []byte {
+	res := make([]byte, 0, len(address[:])+len(key))
+	res = append(res, address[:]...)
+	res = append(res, key...)
+	return res
 }
-

@@ -31,8 +31,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/ontio/ontology/common/config"
 )
 
 const (
@@ -49,19 +47,19 @@ func Color(code, msg string) string {
 }
 
 const (
-	DebugLog = iota
+	TraceLog = iota
+	DebugLog
 	InfoLog
 	WarnLog
 	ErrorLog
 	FatalLog
-	TraceLog
 	MaxLevelLog
 )
 
 var (
 	levels = map[int]string{
 		DebugLog: Color(Green, "[DEBUG]"),
-		InfoLog:  Color(Green, "[INFO ]"),
+		InfoLog:  Color(Cyan, "[INFO ]"),
 		WarnLog:  Color(Yellow, "[WARN ]"),
 		ErrorLog: Color(Red, "[ERROR]"),
 		FatalLog: Color(Red, "[FATAL]"),
@@ -88,6 +86,11 @@ func GetGID() uint64 {
 }
 
 var Log *Logger
+
+func init() {
+	//Default print to console
+	InitLog(InfoLog, Stdout)
+}
 
 func LevelName(level int) string {
 	if name, ok := levels[level]; ok {
@@ -330,7 +333,13 @@ func FileOpen(path string) (*os.File, error) {
 	return logfile, nil
 }
 
+//Init deprecated, use InitLog instead
 func Init(a ...interface{}) {
+	os.Stderr.WriteString("warning: use of deprecated Init. Use InitLog instead\n")
+	InitLog(InfoLog, a...)
+}
+
+func InitLog(logLevel int, a ...interface{}) {
 	writers := []io.Writer{}
 	var logFile *os.File
 	var err error
@@ -355,8 +364,7 @@ func Init(a ...interface{}) {
 		}
 	}
 	fileAndStdoutWrite := io.MultiWriter(writers...)
-	var printlevel int = config.Parameters.PrintLevel
-	Log = New(fileAndStdoutWrite, "", log.Ldate|log.Lmicroseconds, printlevel, logFile)
+	Log = New(fileAndStdoutWrite, "", log.Ldate|log.Lmicroseconds, logLevel, logFile)
 }
 
 func GetLogFileSize() (int64, error) {
@@ -367,9 +375,9 @@ func GetLogFileSize() (int64, error) {
 	return f.Size(), nil
 }
 
-func GetMaxLogChangeInterval() int64 {
-	if config.Parameters.MaxLogSize != 0 {
-		return (config.Parameters.MaxLogSize * BYTE_TO_MB)
+func GetMaxLogChangeInterval(maxLogSize int64) int64 {
+	if maxLogSize != 0 {
+		return (maxLogSize * BYTE_TO_MB)
 	} else {
 		return (DEFAULT_MAX_LOG_SIZE * BYTE_TO_MB)
 	}
@@ -377,7 +385,7 @@ func GetMaxLogChangeInterval() int64 {
 
 func CheckIfNeedNewFile() bool {
 	logFileSize, err := GetLogFileSize()
-	maxLogFileSize := GetMaxLogChangeInterval()
+	maxLogFileSize := GetMaxLogChangeInterval(0)
 	if err != nil {
 		return false
 	}

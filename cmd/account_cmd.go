@@ -20,559 +20,554 @@ package cmd
 
 import (
 	"bufio"
-	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"os"
-	"strconv"
-	"strings"
-	"syscall"
-
 	"github.com/ontio/ontology-crypto/keypair"
 	"github.com/ontio/ontology-crypto/signature"
 	"github.com/ontio/ontology/account"
 	"github.com/ontio/ontology/cmd/common"
 	"github.com/ontio/ontology/cmd/utils"
+	"github.com/ontio/ontology/common/password"
 	"github.com/ontio/ontology/core/types"
 	"github.com/urfave/cli"
-	"golang.org/x/crypto/ssh/terminal"
+	"os"
 )
 
-//map info, to get some information easily
-//todo: move to crypto package
-type keyTypeInfo struct {
-	name string
-	code keypair.KeyType
-}
-
-var keyTypeMap = map[string]keyTypeInfo{
-	"":  {"ecdsa", keypair.PK_ECDSA},
-	"1": {"ecdsa", keypair.PK_ECDSA},
-	"2": {"sm2", keypair.PK_SM2},
-	"3": {"ed25519", keypair.PK_EDDSA},
-}
-
-type curveInfo struct {
-	name string
-	code byte
-}
-
-var curveMap = map[string]curveInfo{
-	"":  {"P-256", keypair.P256},
-	"1": {"P-224", keypair.P224},
-	"2": {"P-256", keypair.P256},
-	"3": {"P-384", keypair.P384},
-	"4": {"P-521", keypair.P521},
-}
-
-type schemeInfo struct {
-	name string
-	code signature.SignatureScheme
-}
-
-var schemeMap = map[string]schemeInfo{
-	"":  {"SHA256withECDSA", signature.SHA256withECDSA},
-	"1": {"SHA224withECDSA", signature.SHA224withECDSA},
-	"2": {"SHA256withECDSA", signature.SHA256withECDSA},
-	"3": {"SHA384withECDSA", signature.SHA384withECDSA},
-	"4": {"SHA512withEDDSA", signature.SHA512withEDDSA},
-	"5": {"SHA3_224withECDSA", signature.SHA3_224withECDSA},
-	"6": {"SHA3_256withECDSA", signature.SHA3_256withECDSA},
-	"7": {"SHA3_384withECDSA", signature.SHA3_384withECDSA},
-	"8": {"SHA3_512withECDSA", signature.SHA3_512withECDSA},
-	"9": {"RIPEMD160withECDSA", signature.RIPEMD160withECDSA},
-}
-
-//account file name
-//TODO: change a default file name
-//TODO: add an option -f to specify the file
-var wFilePath = account.WALLET_FILENAME
-
-//sub commands of 'account'
 var (
 	AccountCommand = cli.Command{
-		Action:      cli.ShowSubcommandHelp,
-		Name:        "account",
-		Usage:       "Manage accounts",
-		ArgsUsage:   " ",
-		Description: `Manage accounts stored in the wallet`,
+		Action:    cli.ShowSubcommandHelp,
+		Name:      "account",
+		Usage:     "Manage accounts",
+		ArgsUsage: "[arguments...]",
+		Description: `Wallet management commands can be used to add, view, modify, delete, import account, and so on.
+You can use ./Ontology account --help command to view help information of wallet management command.`,
 		Subcommands: []cli.Command{
 			{
-				Action:      utils.MigrateFlags(accountCreate),
-				Name:        "add",
-				Usage:       "Add a new account",
-				ArgsUsage:   " ",
-				Flags:       addFlags,
-				Description: `Add a new account`,
+				Action:    accountCreate,
+				Name:      "add",
+				Usage:     "Add a new account",
+				ArgsUsage: "[sub-command options]",
+				Flags: []cli.Flag{
+					utils.AccountQuantityFlag,
+					utils.AccountTypeFlag,
+					utils.AccountKeylenFlag,
+					utils.AccountSigSchemeFlag,
+					utils.AccountDefaultFlag,
+					utils.AccountLabelFlag,
+					utils.IdentityFlag,
+					utils.WalletFileFlag,
+				},
+				Description: ` Add a new account to wallet.
+   Ontology support three type of key: ecdsa, sm2 and ed25519, and support 224、256、384、521 bits length of key in ecdsa, but only support 256 bits length of key in sm2 and ed25519.
+   Ontology support multiple signature scheme.
+   For ECDSA support SHA224withECDSA、SHA256withECDSA、SHA384withECDSA、SHA512withEdDSA、SHA3-224withECDSA、SHA3-256withECDSA、SHA3-384withECDSA、SHA3-512withECDSA、RIPEMD160withECDSA;
+   For SM2 support SM3withSM2, and for SHA512withEdDSA.
+   -------------------------------------------------
+      Key   |key-length(bits)|  signature-scheme
+   ---------|----------------|----------------------
+   1 ecdsa  |  1 P-224: 224  | 1 SHA224withECDSA
+            |----------------|----------------------
+            |  2 P-256: 256  | 2 SHA256withECDSA
+            |----------------|----------------------
+            |  3 P-384: 384  | 3 SHA384withECDSA
+            |----------------|----------------------
+            |  4 P-521: 521  | 4 SHA512withEdDSA
+            |----------------|----------------------
+            |                | 5 SHA3-224withECDSA
+            |                |----------------------
+            |                | 6 SHA3-256withECDSA
+            |                |----------------------
+            |                | 7 SHA3-384withECDSA
+            |                |----------------------
+            |                | 8 SHA3-512withECDSA
+            |                |----------------------
+            |                | 9 RIPEMD160withECDSA
+   ---------|----------------|----------------------
+   2 sm2    | sm2p256v1 256  | SM3withSM2
+   ---------|----------------|----------------------
+   3 ed25519|   25519 256    | SHA512withEdDSA
+   -------------------------------------------------`,
 			},
 			{
-				Action:      utils.MigrateFlags(accountShow),
-				Name:        "list",
-				Usage:       "List existing accounts",
-				ArgsUsage:   " ",
-				Flags:       listFlags,
-				Description: `List existing accounts`,
+				Action:    accountList,
+				Name:      "list",
+				Usage:     "List existing accounts",
+				ArgsUsage: "[sub-command options] <label|address|index>",
+				Flags: []cli.Flag{
+					utils.WalletFileFlag,
+					utils.AccountVerboseFlag,
+				},
+				Description: `List existing accounts. If specified in args, will list those account. If not specified in args, will list all accouns in wallet`,
 			},
 			{
-				Action:      utils.MigrateFlags(accountSet),
-				Name:        "set",
-				Usage:       "Modify an account",
-				ArgsUsage:   "<index>",
-				Flags:       setFlags,
-				Description: `Modify an account`,
+				Action:    accountSet,
+				Name:      "set",
+				Usage:     "Modify an account",
+				ArgsUsage: "[sub-command options] <label|address|index>",
+				Flags: []cli.Flag{
+					utils.AccountSetDefaultFlag,
+					utils.WalletFileFlag,
+					utils.AccountLabelFlag,
+					utils.AccountChangePasswdFlag,
+					utils.AccountSigSchemeFlag,
+				},
+				Description: `Modify settings for an account. Account is specified by address, label of index. Index start from 1. This can be showed by the 'list' command.`,
 			},
 			{
-				Action:      utils.MigrateFlags(accountDelete),
-				Name:        "del",
-				Usage:       "Delete an account",
-				ArgsUsage:   "<index>",
-				Flags:       fileFlags,
-				Description: `Delete an account`,
+				Action:    accountDelete,
+				Name:      "del",
+				Usage:     "Delete an account",
+				ArgsUsage: "[sub-command options] <address|label|index>",
+				Flags: []cli.Flag{
+					utils.WalletFileFlag,
+				},
+				Description: `Delete an account specified by address, label of index. Index start from 1. This can be showed by the 'list' command`,
 			},
-
 			{
-				Action:      utils.MigrateFlags(encrypt),
-				Name:        "encrypt",
-				ArgsUsage:   "<index>",
-				Usage:       "Encrypt the specified private key",
-				Flags:       fileFlags,
-				Description: `Encrypt the specified private key`,
+				Action:    accountImport,
+				Name:      "import",
+				Usage:     "Import accounts of wallet to another",
+				ArgsUsage: "[sub-command options] <address|label|index>",
+				Flags: []cli.Flag{
+					utils.WalletFileFlag,
+					utils.AccountSourceFileFlag,
+					utils.AccountWIFFlag,
+				},
+				Description: "Import accounts of wallet to another. If not specific accounts in args, all account in source will be import",
+			},
+			{
+				Action:    accountExport,
+				Name:      "export",
+				Usage:     "Export accounts to a specified wallet file",
+				ArgsUsage: "[sub-command options] <filename>",
+				Flags: []cli.Flag{
+					utils.WalletFileFlag,
+					utils.AccountLowSecurityFlag,
+				},
 			},
 		},
 	}
 )
 
-//todo: optimise print info.
 func accountCreate(ctx *cli.Context) error {
-	checkFileName(ctx)
 	reader := bufio.NewReader(os.Stdin)
+	optionType := ""
+	optionCurve := ""
+	optionScheme := ""
 
-	var prvkey keypair.PrivateKey
-	var pubkey keypair.PublicKey
-
-	var inputKeyTypeInfo keyTypeInfo
-	var inputCurveInfo curveInfo
-	var inputSchemeInfo schemeInfo
-
-	var defaultFlag = false
-	if ctx.IsSet("default") {
-		fmt.Printf("use default value for all options \n")
-		inputKeyTypeInfo = keyTypeMap[""]
-		inputCurveInfo = curveMap[""]
-		inputSchemeInfo = schemeMap[""]
-		defaultFlag = true
+	optionDefault := ctx.IsSet(utils.GetFlagName(utils.AccountDefaultFlag))
+	if !optionDefault {
+		optionType = checkType(ctx, reader)
+		optionCurve = checkCurve(ctx, reader, &optionType)
+		optionScheme = checkScheme(ctx, reader, &optionType)
 	} else {
-		find := false
-		if ctx.IsSet("type") {
-			for key, val := range keyTypeMap {
-				if val.name == ctx.String("type") {
-					inputKeyTypeInfo = keyTypeMap[key]
-					find = true
-					fmt.Printf("%s is selected. \n", inputKeyTypeInfo.name)
-					break
-				}
-			}
-			if !find {
-				fmt.Printf("%s is not a valid content for option -t \n", ctx.String("type"))
-			}
-		}
-		if !find {
-			inputKeyTypeInfo = chooseKeyType(reader)
-		}
-
-		switch inputKeyTypeInfo.name {
-		case "ecdsa":
-			find := false
-			if (!defaultFlag) && ctx.IsSet("bit-length") {
-				for key, val := range curveMap {
-					if val.name == ctx.String("bit-length") {
-						inputCurveInfo = curveMap[key]
-						find = true
-						fmt.Printf("%s is selected. \n", inputCurveInfo.name)
-						break
-					}
-				}
-				if !find {
-					fmt.Printf("%s is not a valid content for option -b \n", ctx.String("bit-length"))
-				}
-			}
-			if !find {
-				inputCurveInfo = chooseCurve(reader)
-			}
-
-			find = false
-			if (!defaultFlag) && ctx.IsSet("signature-scheme") {
-				for key, val := range schemeMap {
-					if val.name == ctx.String("signature-scheme") {
-						inputSchemeInfo = schemeMap[key]
-						find = true
-						fmt.Printf("%s is selected. \n", inputSchemeInfo.name)
-						break
-					}
-				}
-				if !find {
-					fmt.Printf("%s is not a valid content for option -s \n", ctx.String("signature-scheme"))
-				}
-			}
-			if !find {
-				inputSchemeInfo = chooseScheme(reader)
-			}
-
-			break
-		case "sm2":
-			fmt.Println("Use curve sm2p256v1 with key length of 256 bits and SM3withSM2 as the signature scheme.")
-
-			inputCurveInfo.code = keypair.SM2P256V1
-			inputCurveInfo.name = "SM2P256V1"
-
-			inputSchemeInfo.code = signature.SM3withSM2
-			inputSchemeInfo.name = "SM3withSM2"
-			break
-		case "ed25519":
-			fmt.Println("Use curve 25519 with key length of 256 bits and Ed25519 as the signature scheme.")
-
-			inputCurveInfo.code = keypair.ED25519
-			inputCurveInfo.name = "ED25519"
-
-			inputSchemeInfo.code = signature.SHA512withEDDSA
-			inputSchemeInfo.name = "SHA512withEDDSA"
-			break
-		default:
-			return errors.New("it shouldn't go here. \n")
-		}
-
+		PrintInfoMsg("Use default setting '-t ecdsa -b 256 -s SHA256withECDSA'")
+		PrintInfoMsg("	signature algorithm: %s", keyTypeMap[optionType].name)
+		PrintInfoMsg("	curve: %s", curveMap[optionCurve].name)
+		PrintInfoMsg("	signature scheme: %s", schemeMap[optionScheme].name)
 	}
-
-	var password, repeatPassword []byte
-	for {
-		fmt.Print("Enter a password for encrypting the private key:")
-		password = enterPassword(false)
-		fmt.Print("Re-enter password:")
-		repeatPassword = enterPassword(true)
-		if bytes.Equal(password, repeatPassword) {
-			break
-		} else {
-			fmt.Println("passwords you have enter are not equal, pls try again!")
-		}
-	}
-
-	prvkey, pubkey, _ = keypair.GenerateKeyPair(inputKeyTypeInfo.code, inputCurveInfo.code)
-	ta := types.AddressFromPubKey(pubkey)
-	address := ta.ToBase58()
-
-	prvSectet, _ := keypair.EncryptPrivateKey(prvkey, address, password)
-	h := sha256.Sum256(password)
-	for i := 0; i < len(password); i++ {
-		password[i] = 0
-	}
-
-	var acc = new(account.Accountx)
-	acc.SetKeyPair(prvSectet)
-	acc.SigSch = inputSchemeInfo.name
-	acc.PubKey = hex.EncodeToString(keypair.SerializePublicKey(pubkey))
-	acc.PassHash = hex.EncodeToString(h[:])
-
-	wallet := new(account.WalletData)
-	err := wallet.Load(wFilePath)
+	optionFile := checkFileName(ctx)
+	optionNumber := checkNumber(ctx)
+	optionLabel := checkLabel(ctx)
+	pass, _ := password.GetConfirmedPassword()
+	keyType := keyTypeMap[optionType].code
+	curve := curveMap[optionCurve].code
+	scheme := schemeMap[optionScheme].code
+	wallet, err := account.Open(optionFile)
 	if err != nil {
-		wallet.Inititalize()
+		return fmt.Errorf("open wallet error:%s", err)
+	}
+	defer common.ClearPasswd(pass)
+	if ctx.Bool(utils.IdentityFlag.Name) {
+		// create ONT ID
+		wd := wallet.GetWalletData()
+		id, err := account.NewIdentity(optionLabel, keyType, curve, pass)
+		if err != nil {
+			return fmt.Errorf("create ONT ID error: %s", err)
+		}
+		wd.AddIdentity(id)
+		err = wd.Save(optionFile)
+		if err != nil {
+			return fmt.Errorf("save to %s error: %s", optionFile, err)
+		}
+		PrintInfoMsg("ONT ID created:%s", id.ID)
+		PrintInfoMsg("Bind public key:%s", id.Control[0].Public)
+		return nil
+	}
+	for i := 0; i < optionNumber; i++ {
+		label := optionLabel
+		if label != "" && optionNumber > 1 {
+			label = fmt.Sprintf("%s%d", label, i+1)
+		}
+		acc, err := wallet.NewAccount(label, keyType, curve, scheme, pass)
+		if err != nil {
+			return fmt.Errorf("new account error:%s", err)
+		}
+		PrintInfoMsg("Index:%d", wallet.GetAccountNum())
+		PrintInfoMsg("Label:%s", label)
+		PrintInfoMsg("Address:%s", acc.Address.ToBase58())
+		PrintInfoMsg("Public key:%s", hex.EncodeToString(keypair.SerializePublicKey(acc.PublicKey)))
+		PrintInfoMsg("Signature scheme:%s", acc.SigScheme.Name())
 	}
 
-	wallet.AddAccount(acc)
-
-	if wallet.Save(wFilePath) != nil {
-		fmt.Println("Wallet file save failed.")
-	}
-
-	fmt.Println("\nCreate account successfully.")
-	fmt.Println("Address: ", address)
-	fmt.Println("Public key:", hex.EncodeToString(keypair.SerializePublicKey(pubkey)))
-	fmt.Println("Signature scheme:", acc.SigSch)
-
+	PrintInfoMsg("Create account successfully.")
 	return nil
 }
 
-func accountShow(ctx *cli.Context) error {
-	wallet := new(account.WalletData)
-	err := wallet.Load(wFilePath)
+func accountList(ctx *cli.Context) error {
+	optionFile := checkFileName(ctx)
+	wallet, err := account.Open(optionFile)
 	if err != nil {
-		wallet.Inititalize()
+		return fmt.Errorf("open wallet:%s error:%s", optionFile, err)
 	}
-	if len(wallet.Accounts) == 0 {
-		fmt.Println("No account")
+	accNum := wallet.GetAccountNum()
+	if accNum == 0 {
+		PrintInfoMsg("No account.")
 		return nil
 	}
-
-	if !ctx.Bool("verbose") {
-		// look for every account and show details
-		for i, acc := range wallet.Accounts {
-			if acc.IsDefault {
-				fmt.Printf("* %v\t%v\n", i+1, acc.Address)
-			} else {
-				fmt.Printf("  %v\t%v\n", i+1, acc.Address)
+	accList := make(map[string]string, ctx.NArg())
+	for i := 0; i < ctx.NArg(); i++ {
+		addr := ctx.Args().Get(i)
+		accMeta := common.GetAccountMetadataMulti(wallet, addr)
+		if accMeta == nil {
+			PrintWarnMsg("Cannot find account by:%s in wallet:%s", addr, utils.GetFlagName(utils.WalletFileFlag))
+			continue
+		}
+		accList[accMeta.Address] = ""
+	}
+	for i := 1; i <= accNum; i++ {
+		accMeta := wallet.GetAccountMetadataByIndex(i)
+		if accMeta == nil {
+			continue
+		}
+		if len(accList) > 0 {
+			_, ok := accList[accMeta.Address]
+			if !ok {
+				continue
 			}
 		}
-		fmt.Println("\nUse -v or --verbose option to display details.")
-	} else {
-		// look for every account and show address only
-		for i, acc := range wallet.Accounts {
-			if acc.IsDefault {
-				fmt.Printf("* %v\t%v\n", i+1, acc.Address)
+		if !ctx.Bool(utils.GetFlagName(utils.AccountVerboseFlag)) {
+			if accMeta.IsDefault {
+				PrintInfoMsg("Index:%-4d Address:%s  Label:%s (default)", i, accMeta.Address, accMeta.Label)
 			} else {
-				fmt.Printf("  %v\t%v\n", i+1, acc.Address)
+				PrintInfoMsg("Index:%-4d Address:%s  Label:%s", i, accMeta.Address, accMeta.Label)
 			}
-			fmt.Printf("	Signature algorithm: %v\n", acc.Alg)
-			fmt.Printf("	Curve: %v\n", acc.Param["curve"])
-			fmt.Printf("	Key length: %v bits\n", len(acc.Key)*8)
-			fmt.Printf("	Public key: %v\n", acc.PubKey)
-			fmt.Printf("	Signature scheme: %v\n", acc.SigSch)
-			fmt.Println()
+			continue
 		}
+		if accMeta.IsDefault {
+			PrintInfoMsg("%v\t%v (default)", i, accMeta.Address)
+		} else {
+			PrintInfoMsg("%v\t%v", i, accMeta.Address)
+		}
+		PrintInfoMsg("	Label: %v", accMeta.Label)
+		PrintInfoMsg("	Signature algorithm: %v", accMeta.KeyType)
+		PrintInfoMsg("	Curve: %v", accMeta.Curve)
+		PrintInfoMsg("	Key length: %v bits", len(accMeta.Key)*8)
+		PrintInfoMsg("	Public key: %v", accMeta.PubKey)
+		PrintInfoMsg("	Signature scheme: %v\n", accMeta.SigSch)
 	}
 	return nil
 }
 
 //set signature scheme for an account
 func accountSet(ctx *cli.Context) error {
-	if len(ctx.Args()) < 1 {
-		fmt.Printf("Please enter an index of account, for index list please use 'account list' command.\n")
+	if ctx.NArg() < 1 {
+		PrintErrorMsg("Missing account argument.")
+		cli.ShowSubcommandHelp(ctx)
 		return nil
 	}
-	index, err := strconv.Atoi(ctx.Args()[0])
+	address := ctx.Args().First()
+	wallet, err := common.OpenWallet(ctx)
 	if err != nil {
-		fmt.Printf("Your input is not an number.\n")
-		return nil
+		return err
 	}
-	wallet := new(account.WalletData)
-	if wallet.Load(wFilePath) != nil {
-		wallet.Inititalize()
+	accMeta := common.GetAccountMetadataMulti(wallet, address)
+	if accMeta == nil {
+		return fmt.Errorf("cannot find account info by: %s", address)
 	}
-
-	if index < 1 || index > len(wallet.Accounts) {
-		fmt.Printf("Your input is out of index range.\n")
-		return nil
+	address = accMeta.Address
+	label := accMeta.Label
+	if ctx.Bool(utils.GetFlagName(utils.AccountSetDefaultFlag)) {
+		err = wallet.SetDefaultAccount(address)
+		if err != nil {
+			PrintErrorMsg("Set Label:%s Account:%s as default failed, %s", label, address, err)
+		} else {
+			PrintInfoMsg("Set Label:%s Account:%s as default successfully", label, address)
+		}
 	}
-
-	find := false
-
-	if ctx.IsSet("default") {
-		fmt.Printf("Set account %d to the default account\n", index)
-		for _, v := range wallet.Accounts {
-			if v.IsDefault {
-				v.IsDefault = false
+	if ctx.IsSet(utils.GetFlagName(utils.AccountLabelFlag)) {
+		newLabel := ctx.String(utils.GetFlagName(utils.AccountLabelFlag))
+		err = wallet.SetLabel(address, newLabel)
+		if err != nil {
+			PrintErrorMsg("Set Account:%s Label:%s to %s failed, %s", address, label, newLabel, err)
+		} else {
+			PrintInfoMsg("Set Account:%s Label:%s to %s successfully.", address, label, newLabel)
+			label = newLabel
+		}
+	}
+	if ctx.IsSet(utils.GetFlagName(utils.AccountSigSchemeFlag)) {
+		find := false
+		sigScheme := ctx.String(utils.GetFlagName(utils.AccountSigSchemeFlag))
+		var sigSch signature.SignatureScheme
+		for key, val := range schemeMap {
+			if key == sigScheme {
+				find = true
+				sigSch = val.code
+				break
+			}
+			if val.name == sigScheme {
+				find = true
+				sigSch = val.code
+				break
 			}
 		}
-		wallet.Accounts[index-1].IsDefault = true
-	} else {
-		if ctx.IsSet("signature-scheme") {
-			for key, val := range schemeMap {
-				if val.name == ctx.String("signature-scheme") {
-					inputSchemeInfo := schemeMap[key]
-					find = true
-					fmt.Printf("%s is selected. \n", inputSchemeInfo.name)
-					wallet.Accounts[index-1].SigSch = inputSchemeInfo.name
-					break
-				}
+		if find {
+			err = wallet.ChangeSigScheme(address, sigSch)
+			if err != nil {
+				PrintErrorMsg("Set Label:%s Account:%s SigScheme to: %s failed, %s", accMeta.Label, accMeta.Address, sigSch.Name(), err)
+			} else {
+				PrintInfoMsg("Set Label:%s Account:%s SigScheme to: %s successfully.", accMeta.Label, accMeta.Address, sigSch.Name())
 			}
-			fmt.Printf("%s is not a valid content for option -s \n", ctx.String("signature-scheme"))
-		}
-		if !find {
-			fmt.Printf("Invalid arguments! Nothing changed.\n")
+		} else {
+			PrintInfoMsg("%s is not a valid content for option -s", sigScheme)
 		}
 	}
 
-	if wallet.Save(wFilePath) != nil {
-		fmt.Println("Wallet file save failed.")
+	if ctx.Bool(utils.GetFlagName(utils.AccountChangePasswdFlag)) {
+		passwd, err := common.GetPasswd(ctx)
+		if err != nil {
+			return err
+		}
+		defer common.ClearPasswd(passwd)
+		PrintInfoMsg("Please input new password:")
+		newPass, err := password.GetConfirmedPassword()
+		defer common.ClearPasswd(newPass)
+		if err != nil {
+			return fmt.Errorf("input password error:%s", err)
+		}
+		err = wallet.ChangePassword(address, passwd, newPass)
+		if err != nil {
+			PrintErrorMsg("Change password label:%s account:%s failed, %s", accMeta.Label, address, err)
+		} else {
+			PrintInfoMsg("Change password label:%s account:%s successfully", accMeta.Label, address)
+		}
 	}
 	return nil
 }
 
 //delete an account by index from 'list'
 func accountDelete(ctx *cli.Context) error {
-	if len(ctx.Args()) < 1 {
-		fmt.Printf("Please enter an index of account, for index list please use 'account list' command.\n")
+	if ctx.NArg() < 1 {
+		PrintErrorMsg("Missing account argument.")
+		cli.ShowSubcommandHelp(ctx)
 		return nil
 	}
-	index, err := strconv.Atoi(ctx.Args()[0])
+	address := ctx.Args().First()
+
+	wallet, err := common.OpenWallet(ctx)
 	if err != nil {
-		fmt.Printf("Your input is not an number.\n")
-		return nil
+		return err
 	}
-
-	wallet := new(account.WalletData)
-	if wallet.Load(wFilePath) != nil {
-		wallet.Inititalize()
+	accMeta := common.GetAccountMetadataMulti(wallet, address)
+	if accMeta == nil {
+		return fmt.Errorf("cannot get account by: %s", address)
 	}
-
-	if index < 1 || index > len(wallet.Accounts) {
-		fmt.Printf("Your input is out of index range.\n")
-		return nil
+	passwd, err := common.GetPasswd(ctx)
+	if err != nil {
+		return err
 	}
-	addr := wallet.DelAccount(index)
-
-	if wallet.Save(wFilePath) != nil {
-		fmt.Println("Wallet file save failed.")
+	defer common.ClearPasswd(passwd)
+	_, err = wallet.DeleteAccount(accMeta.Address, passwd)
+	if err != nil {
+		PrintErrorMsg("Delete account label:%s address:%s failed, %s", accMeta.Label, accMeta.Address, err)
+	} else {
+		PrintInfoMsg("Delete account label:%s address:%s successfully.", accMeta.Label, accMeta.Address)
 	}
-
-	fmt.Printf("Delete account successfully.\n")
-	fmt.Printf("index = %v, address = %v.\n", index, addr)
 	return nil
 }
 
-//change password
-func encrypt(ctx *cli.Context) error {
-	if len(ctx.Args()) < 1 {
-		fmt.Printf("Please enter an index of account, for index list please use 'account list' command.\n")
+func accountImport(ctx *cli.Context) error {
+	source := ctx.String(utils.GetFlagName(utils.AccountSourceFileFlag))
+	if source == "" {
+		PrintErrorMsg("Missing source wallet path argument to import.")
+		cli.ShowSubcommandHelp(ctx)
 		return nil
 	}
-	index, err := strconv.Atoi(ctx.Args()[0])
+
+	target := ctx.String(utils.GetFlagName(utils.WalletFileFlag))
+	fn := checkFileName(ctx)
+	wallet, err := account.Open(fn)
 	if err != nil {
-		fmt.Printf("Your input is not an number.\n")
-		return nil
-	}
-	wallet := new(account.WalletData)
-	if wallet.Load(wFilePath) != nil {
-		wallet.Inititalize()
-	}
-	if index < 1 || index > len(wallet.Accounts) {
-		fmt.Printf("Your input is out of index range.\n")
-		return nil
+		return err
 	}
 
-	//password enter.
-	var old_password []byte
-	for wait := true; wait; {
-		fmt.Print("Please enter the original password:")
-		old_password = enterPassword(false)
-		h := sha256.Sum256(old_password)
+	succ := 0
+	fail := 0
+	skip := 0
+	total := 0
 
-		//todo: check is pwd is correct by passhash.
-		passhash, _ := hex.DecodeString(wallet.Accounts[index-1].PassHash)
-		if bytes.Equal(passhash, h[:]) {
-			wait = false
-		} else {
-			fmt.Print("Wrong password!")
-		}
-	}
-
-	prv, _ := keypair.DecryptPrivateKey(wallet.Accounts[index-1].GetKeyPair(), old_password)
-
-	//password enter.
-	var password, repeatPassword []byte
-	for wait := true; wait; {
-		fmt.Print("Enter a password for encrypting the private key:")
-		password = enterPassword(false)
-		fmt.Print("Re-enter password:")
-		repeatPassword = enterPassword(true)
-		if bytes.Equal(password, repeatPassword) {
-			break
-		} else {
-			fmt.Println("inputs not match, please try again!")
-		}
-	}
-
-	prvSectet, _ := keypair.EncryptPrivateKey(prv, wallet.Accounts[index-1].Address, password)
-	h := sha256.Sum256(password)
-	for i := 0; i < len(password); i++ {
-		password[i] = 0
-	}
-
-	wallet.Accounts[index-1].SetKeyPair(prvSectet)
-	wallet.Accounts[index-1].PassHash = hex.EncodeToString(h[:])
-
-	if wallet.Save(wFilePath) != nil {
-		fmt.Println("Wallet file save failed.")
-	}
-
-	fmt.Println("encrypt account successfully.")
-	fmt.Println("")
-
-	return nil
-}
-
-// wait for user to enter password
-func enterPassword(is_repeat bool) []byte {
-	for wait := true; wait; {
-		bytePassword, err := terminal.ReadPassword(int(syscall.Stdin))
+	if ctx.Bool(utils.GetFlagName(utils.AccountWIFFlag)) {
+		// import WIF keys
+		file, err := os.Open(source)
 		if err != nil {
-			fmt.Println("system cannot read your input, sorry.")
+			return err
 		}
-		fmt.Println("")
-		if !is_repeat && len(bytePassword) == 0 {
-			fmt.Print("password cannot be null, input again:")
-		} else {
-			return bytePassword
+		f := bufio.NewScanner(file)
+		keys := make([]keypair.PrivateKey, 0)
+		for f.Scan() {
+			wif := f.Bytes()
+			pri, err := keypair.GetP256KeyPairFromWIF(wif)
+			common.ClearPasswd(wif)
+			if err != nil {
+				return err
+			}
+			keys = append(keys, pri)
+		}
+		total = len(keys)
+		PrintInfoMsg("Please input a password to encrypt the imported key(s)")
+		pwd, err := password.GetConfirmedPassword()
+		if err != nil {
+			return err
+		}
+		for _, v := range keys {
+			pub := v.Public()
+			addr := types.AddressFromPubKey(pub)
+			b58addr := addr.ToBase58()
+			old := wallet.GetAccountMetadataByAddress(b58addr)
+			if old != nil {
+				PrintWarnMsg("Account %s already exists.", b58addr)
+				skip += 1
+				continue
+			}
+			PrintInfoMsg("Import account %s", b58addr)
+			k, err := keypair.EncryptPrivateKey(v, b58addr, pwd)
+			if err != nil {
+				PrintWarnMsg("Import account:%s error %s", b58addr, err)
+				fail += 1
+				continue
+			}
+			var accMeta account.AccountMetadata
+			accMeta.Address = k.Address
+			accMeta.KeyType = k.Alg
+			accMeta.EncAlg = k.EncAlg
+			accMeta.Hash = k.Hash
+			accMeta.Key = k.Key
+			accMeta.Curve = k.Param["curve"]
+			accMeta.Salt = k.Salt
+			accMeta.Label = ""
+			accMeta.PubKey = hex.EncodeToString(keypair.SerializePublicKey(v.Public()))
+			accMeta.SigSch = signature.SHA256withECDSA.Name()
+			err = wallet.ImportAccount(&accMeta)
+			if err != nil {
+				PrintWarnMsg("Import account:%s error:%s", accMeta.Address, err)
+				fail += 1
+				continue
+			}
+			succ += 1
+		}
+		common.ClearPasswd(pwd)
+	} else {
+		ctx.Set(utils.GetFlagName(utils.WalletFileFlag), source)
+		sourceWallet, err := common.OpenWallet(ctx)
+		if err != nil {
+			return fmt.Errorf("open source wallet to import error: %s", err)
+		}
+		accountNum := sourceWallet.GetAccountNum()
+		if accountNum == 0 {
+			PrintWarnMsg("No account to import.")
+			return nil
+		}
+		accList := make(map[string]string, ctx.NArg())
+		for i := 0; i < ctx.NArg(); i++ {
+			addr := ctx.Args().Get(i)
+			accMeta := common.GetAccountMetadataMulti(sourceWallet, addr)
+			if accMeta == nil {
+				PrintWarnMsg("Cannot find account %s in wallet %s.", addr, source)
+				continue
+			}
+			accList[accMeta.Address] = ""
+		}
+
+		for i := 1; i <= accountNum; i++ {
+			accMeta := sourceWallet.GetAccountMetadataByIndex(i)
+			if accMeta == nil {
+				continue
+			}
+			if len(accList) > 0 {
+				_, ok := accList[accMeta.Address]
+				if !ok {
+					//Account not in import list, skip
+					continue
+				}
+			}
+			total++
+			old := wallet.GetAccountMetadataByAddress(accMeta.Address)
+			if old != nil {
+				skip++
+				PrintWarnMsg("Account: %s (label: %s) already exists in wallet, skip.", accMeta.Address, accMeta.Label)
+				continue
+			}
+			err = wallet.ImportAccount(accMeta)
+			if err != nil {
+				fail++
+				PrintWarnMsg("Import account: %s (label: %s) failed, %s", accMeta.Address, accMeta.Label, err)
+				continue
+			}
+			succ++
+			PrintInfoMsg("Import account: %s (label: %s) successfully.", accMeta.Address, accMeta.Label)
 		}
 	}
+
+	PrintInfoMsg("Import from %s to %s complete.", source, target)
+	PrintInfoMsg("Total:\t%d", total)
+	PrintInfoMsg("Success:%d", succ)
+	PrintInfoMsg("Failed:\t%d", fail)
+	PrintInfoMsg("Skip:\t%d", skip)
 	return nil
 }
 
-// wait for user to choose options
-func chooseKeyType(reader *bufio.Reader) keyTypeInfo {
-	var t keyTypeInfo
-
-	//choose key type process
-	common.PrintNotice("key type")
-	for true {
-		tmp, _ := reader.ReadString('\n')
-		tmp = strings.TrimSpace(tmp)
-		_, ok := keyTypeMap[tmp]
-		if ok {
-			t = keyTypeMap[tmp]
-			break
-		} else {
-			fmt.Print("Input error! Please enter a number above: ")
+func accountExport(ctx *cli.Context) error {
+	if ctx.NArg() <= 0 {
+		PrintErrorMsg("Missing target file argument to export.")
+		cli.ShowSubcommandHelp(ctx)
+		return nil
+	}
+	target := ctx.Args().First()
+	client, err := common.OpenWallet(ctx)
+	if err != nil {
+		return err
+	}
+	wallet := client.GetWalletData()
+	if ctx.IsSet(utils.GetFlagName(utils.AccountLowSecurityFlag)) {
+		n := client.GetAccountNum()
+		passwords := make([][]byte, n)
+		for i := 0; i < n; i++ {
+			ac := client.GetAccountMetadataByIndex(i + 1)
+			PrintInfoMsg("Account %d %s: %s", i+1, ac.Label, ac.Address)
+			for j := 0; j < 3; j++ {
+				pwd, err := password.GetPassword()
+				if err != nil {
+					fmt.Println(err)
+				} else {
+					passwords[i] = pwd
+					break
+				}
+			}
+		}
+		wallet = wallet.Clone()
+		err := wallet.ToLowSecurity(passwords)
+		for _, v := range passwords {
+			common.ClearPasswd(v)
+		}
+		if err != nil {
+			return fmt.Errorf("export failed: %s", err)
 		}
 	}
-
-	fmt.Printf("%s is selected. \n", t.name)
-	return t
-}
-func chooseScheme(reader *bufio.Reader) schemeInfo {
-	var s schemeInfo
-	common.PrintNotice("signature-scheme")
-	for true {
-		tmp, _ := reader.ReadString('\n')
-		tmp = strings.TrimSpace(tmp)
-
-		_, ok := schemeMap[tmp]
-		if ok {
-			s = schemeMap[tmp]
-			break
-		} else {
-			fmt.Print("Input error! Please enter a number above:")
-		}
-	}
-	fmt.Printf("scheme %s is selected.\n", s.name)
-	return s
-}
-func chooseCurve(reader *bufio.Reader) curveInfo {
-	var c curveInfo
-	common.PrintNotice("curve")
-
-	for true {
-		t, _ := reader.ReadString('\n')
-		t = strings.TrimSpace(t)
-
-		_, ok := curveMap[t]
-		if ok {
-			c = curveMap[t]
-			break
-		} else {
-			fmt.Print("Input error! Please enter a number above:")
-		}
+	err = wallet.Save(target)
+	if err != nil {
+		return fmt.Errorf("save wallet file error: %s", err)
 	}
 
-	fmt.Printf("curve %s is selected.\n", c.name)
-
-	return c
-}
-
-func checkFileName(ctx *cli.Context) error {
-	if ctx.IsSet("file") {
-		wFilePath = ctx.String("file")
-	}
+	PrintInfoMsg("Export wallet success.")
 	return nil
 }

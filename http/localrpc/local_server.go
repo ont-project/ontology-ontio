@@ -16,12 +16,14 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Package localrpc privides a function to start local rpc server
 package localrpc
 
 import (
 	"net/http"
 	"strconv"
 
+	"fmt"
 	cfg "github.com/ontio/ontology/common/config"
 	"github.com/ontio/ontology/common/log"
 	"github.com/ontio/ontology/http/base/rpc"
@@ -32,7 +34,7 @@ const (
 	LOCAL_DIR  string = "/local"
 )
 
-func StartLocalServer() {
+func StartLocalServer() error {
 	log.Debug()
 	http.HandleFunc(LOCAL_DIR, rpc.Handle)
 
@@ -43,8 +45,9 @@ func StartLocalServer() {
 	rpc.HandleFunc("setdebuginfo", rpc.SetDebugInfo)
 
 	// TODO: only listen to local host
-	err := http.ListenAndServe(":"+strconv.Itoa(cfg.Parameters.HttpLocalPort), nil)
+	err := http.ListenAndServe(":"+strconv.Itoa(int(cfg.DefConfig.Rpc.HttpLocalPort)), nil)
 	if err != nil {
-		log.Fatal("ListenAndServe: ", err.Error())
+		return fmt.Errorf("ListenAndServe error:%s", err)
 	}
+	return nil
 }

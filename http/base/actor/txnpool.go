@@ -16,22 +16,24 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Package actor privides communication with other actor
 package actor
 
 import (
 	"errors"
 	"time"
 
+	"github.com/ontio/ontology-eventbus/actor"
 	"github.com/ontio/ontology/common"
 	"github.com/ontio/ontology/common/log"
 	"github.com/ontio/ontology/core/types"
 	ontErrors "github.com/ontio/ontology/errors"
 	tcomn "github.com/ontio/ontology/txnpool/common"
-	"github.com/ontio/ontology-eventbus/actor"
 )
 
 var txnPid *actor.PID
 var txnPoolPid *actor.PID
+var DisableSyncVerifyTx = false
 
 func SetTxPid(actr *actor.PID) {
 	txnPid = actr
@@ -39,36 +41,49 @@ func SetTxPid(actr *actor.PID) {
 func SetTxnPoolPid(actr *actor.PID) {
 	txnPoolPid = actr
 }
-func AppendTxToPool(txn *types.Transaction) ontErrors.ErrCode {
-	txReq := &tcomn.TxReq{
-		Tx:     txn,
-		Sender: tcomn.HttpSender,
+
+//append transaction to pool to txpool actor
+func AppendTxToPool(txn *types.Transaction) (ontErrors.ErrCode, string) {
+	if DisableSyncVerifyTx {
+		txReq := &tcomn.TxReq{txn, tcomn.HttpSender, nil}
+		txnPid.Tell(txReq)
+		return ontErrors.ErrNoError, ""
 	}
+	//add Pre Execute Contract
+	_, err := PreExecuteContract(txn)
+	if err != nil {
+		return ontErrors.ErrUnknown, err.Error()
+	}
+	ch := make(chan *tcomn.TxResult, 1)
+	txReq := &tcomn.TxReq{txn, tcomn.HttpSender, ch}
 	txnPid.Tell(txReq)
-	return ontErrors.ErrNoError
+	if msg, ok := <-ch; ok {
+		return msg.Err, msg.Desc
+	}
+	return ontErrors.ErrUnknown, ""
 }
 
-func GetTxsFromPool(byCount bool) (map[common.Uint256]*types.Transaction, common.Fixed64) {
+//GetTxsFromPool from txpool actor
+func GetTxsFromPool(byCount bool) map[common.Uint256]*types.Transaction {
 	future := txnPoolPid.RequestFuture(&tcomn.GetTxnPoolReq{ByCount: byCount}, REQ_TIMEOUT*time.Second)
 	result, err := future.Result()
 	if err != nil {
 		log.Errorf(ERR_ACTOR_COMM, err)
-		return nil, 0
+		return nil
 	}
 	txpool, ok := result.(*tcomn.GetTxnPoolRsp)
 	if !ok {
-		return nil, 0
+		return nil
 	}
 	txMap := make(map[common.Uint256]*types.Transaction)
-	var networkFeeSum common.Fixed64
 	for _, v := range txpool.TxnPool {
 		txMap[v.Tx.Hash()] = v.Tx
-		networkFeeSum += v.Fee
 	}
-	return txMap, networkFeeSum
+	return txMap
 
 }
 
+//GetTxFromPool from txpool actor
 func GetTxFromPool(hash common.Uint256) (tcomn.TXEntry, error) {
 
 	future := txnPid.RequestFuture(&tcomn.GetTxnReq{hash}, REQ_TIMEOUT*time.Second)
@@ -95,20 +110,21 @@ func GetTxFromPool(hash common.Uint256) (tcomn.TXEntry, error) {
 	if !ok {
 		return tcomn.TXEntry{}, errors.New("fail")
 	}
-	txnEntry := tcomn.TXEntry{rsp.Txn, 0, txStatus.TxStatus}
+	txnEntry := tcomn.TXEntry{rsp.Txn, txStatus.TxStatus}
 	return txnEntry, nil
 }
 
-func GetTxnCnt() ([]uint64, error) {
-	future := txnPid.RequestFuture(&tcomn.GetTxnStats{}, REQ_TIMEOUT*time.Second)
+//GetTxnCount from txpool actor
+func GetTxnCount() ([]uint32, error) {
+	future := txnPid.RequestFuture(&tcomn.GetTxnCountReq{}, REQ_TIMEOUT*time.Second)
 	result, err := future.Result()
 	if err != nil {
 		log.Errorf(ERR_ACTOR_COMM, err)
-		return []uint64{}, err
+		return []uint32{}, err
 	}
-	txnCnt, ok := result.(*tcomn.GetTxnStatsRsp)
+	txnCnt, ok := result.(*tcomn.GetTxnCountRsp)
 	if !ok {
-		return []uint64{}, errors.New("fail")
+		return []uint32{}, errors.New("fail")
 	}
 	return txnCnt.Count, nil
 }

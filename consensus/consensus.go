@@ -19,14 +19,12 @@
 package consensus
 
 import (
-	"strings"
-
+	"github.com/ontio/ontology-eventbus/actor"
 	"github.com/ontio/ontology/account"
-	"github.com/ontio/ontology/common/config"
 	"github.com/ontio/ontology/common/log"
 	"github.com/ontio/ontology/consensus/dbft"
 	"github.com/ontio/ontology/consensus/solo"
-	"github.com/ontio/ontology-eventbus/actor"
+	"github.com/ontio/ontology/consensus/vbft"
 )
 
 type ConsensusService interface {
@@ -38,21 +36,22 @@ type ConsensusService interface {
 const (
 	CONSENSUS_DBFT = "dbft"
 	CONSENSUS_SOLO = "solo"
+	CONSENSUS_VBFT = "vbft"
 )
 
-func NewConsensusService(account *account.Account, txpool *actor.PID, ledger *actor.PID, p2p *actor.PID) (ConsensusService, error) {
-	consensusType := strings.ToLower(config.Parameters.ConsensusType)
+func NewConsensusService(consensusType string, account *account.Account, txpool *actor.PID, ledger *actor.PID, p2p *actor.PID) (ConsensusService, error) {
 	if consensusType == "" {
 		consensusType = CONSENSUS_DBFT
 	}
-
 	var consensus ConsensusService
 	var err error
 	switch consensusType {
 	case CONSENSUS_DBFT:
 		consensus, err = dbft.NewDbftService(account, txpool, p2p)
 	case CONSENSUS_SOLO:
-		consensus, err = solo.NewSoloService(account, txpool, ledger)
+		consensus, err = solo.NewSoloService(account, txpool)
+	case CONSENSUS_VBFT:
+		consensus, err = vbft.NewVbftServer(account, txpool, p2p)
 	}
 	log.Infof("ConsensusType:%s", consensusType)
 	return consensus, err

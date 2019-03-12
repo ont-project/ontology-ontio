@@ -16,21 +16,29 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-// Package proc privides functions for handle messages from
+// Package proc provides functions for handle messages from
 // consensus/ledger/net/http/validators
 package proc
 
 import (
-	"sort"
-	"sync"
-
+	"bytes"
+	"encoding/hex"
+	"fmt"
 	"github.com/ontio/ontology-eventbus/actor"
 	"github.com/ontio/ontology/common"
+	"github.com/ontio/ontology/common/config"
 	"github.com/ontio/ontology/common/log"
+	"github.com/ontio/ontology/core/ledger"
 	tx "github.com/ontio/ontology/core/types"
 	"github.com/ontio/ontology/errors"
+	httpcom "github.com/ontio/ontology/http/base/common"
+	params "github.com/ontio/ontology/smartcontract/service/native/global_params"
+	nutils "github.com/ontio/ontology/smartcontract/service/native/utils"
 	tc "github.com/ontio/ontology/txnpool/common"
 	"github.com/ontio/ontology/validator/types"
+	"sort"
+	"strconv"
+	"sync"
 )
 
 type txStats struct {
@@ -39,8 +47,9 @@ type txStats struct {
 }
 
 type serverPendingTx struct {
-	tx     *tx.Transaction // Pending tx
-	sender tc.SenderType   // Indicate which sender tx is from
+	tx     *tx.Transaction   // Pending tx
+	sender tc.SenderType     // Indicate which sender tx is from
+	ch     chan *tc.TxResult // channel to send tx result
 }
 
 type pendingBlock struct {
@@ -63,28 +72,84 @@ type registerValidators struct {
 
 // TXPoolServer contains all api to external modules
 type TXPoolServer struct {
-	mu            sync.RWMutex                        // Sync mutex
-	wg            sync.WaitGroup                      // Worker sync
-	workers       []txPoolWorker                      // Worker pool
-	txPool        *tc.TXPool                          // The tx pool that holds the valid transaction
-	allPendingTxs map[common.Uint256]*serverPendingTx // The txs that server is processing
-	pendingBlock  *pendingBlock                       // The block that server is processing
-	actors        map[tc.ActorType]*actor.PID         // The actors running in the server
-	validators    *registerValidators                 // The registered validators
-	stats         txStats                             // The transaction statstics
-	slots         chan struct{}                       // The limited slots for the new transaction
+	mu                    sync.RWMutex                        // Sync mutex
+	wg                    sync.WaitGroup                      // Worker sync
+	workers               []txPoolWorker                      // Worker pool
+	txPool                *tc.TXPool                          // The tx pool that holds the valid transaction
+	allPendingTxs         map[common.Uint256]*serverPendingTx // The txs that server is processing
+	pendingBlock          *pendingBlock                       // The block that server is processing
+	actors                map[tc.ActorType]*actor.PID         // The actors running in the server
+	validators            *registerValidators                 // The registered validators
+	stats                 txStats                             // The transaction statstics
+	slots                 chan struct{}                       // The limited slots for the new transaction
+	height                uint32                              // The current block height
+	gasPrice              uint64                              // Gas price to enforce for acceptance into the pool
+	disablePreExec        bool                                // Disbale PreExecute a transaction
+	disableBroadcastNetTx bool                                // Disable broadcast tx from network
 }
 
 // NewTxPoolServer creates a new tx pool server to schedule workers to
 // handle and filter inbound transactions from the network, http, and consensus.
-func NewTxPoolServer(num uint8) *TXPoolServer {
+func NewTxPoolServer(num uint8, disablePreExec, disableBroadcastNetTx bool) *TXPoolServer {
 	s := &TXPoolServer{}
-	s.init(num)
+	s.init(num, disablePreExec, disableBroadcastNetTx)
 	return s
 }
 
+// getGlobalGasPrice returns a global gas price
+func getGlobalGasPrice() (uint64, error) {
+	mutable, err := httpcom.NewNativeInvokeTransaction(0, 0, nutils.ParamContractAddress, 0, "getGlobalParam", []interface{}{[]interface{}{"gasPrice"}})
+	if err != nil {
+		return 0, fmt.Errorf("NewNativeInvokeTransaction error:%s", err)
+	}
+	tx, err := mutable.IntoImmutable()
+	if err != nil {
+		return 0, err
+	}
+	result, err := ledger.DefLedger.PreExecuteContract(tx)
+	if err != nil {
+		return 0, fmt.Errorf("PreExecuteContract failed %v", err)
+	}
+
+	queriedParams := new(params.Params)
+	data, err := hex.DecodeString(result.Result.(string))
+	if err != nil {
+		return 0, fmt.Errorf("decode result error %v", err)
+	}
+
+	err = queriedParams.Deserialize(bytes.NewBuffer([]byte(data)))
+	if err != nil {
+		return 0, fmt.Errorf("deserialize result error %v", err)
+	}
+	_, param := queriedParams.GetParam("gasPrice")
+	if param.Value == "" {
+		return 0, fmt.Errorf("failed to get param for gasPrice")
+	}
+
+	gasPrice, err := strconv.ParseUint(param.Value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse uint %v", err)
+	}
+
+	return gasPrice, nil
+}
+
+// getGasPriceConfig returns the bigger one between global and cmd configured
+func getGasPriceConfig() uint64 {
+	globalGasPrice, err := getGlobalGasPrice()
+	if err != nil {
+		log.Info(err)
+		return 0
+	}
+
+	if globalGasPrice < config.DefConfig.Common.GasPrice {
+		return config.DefConfig.Common.GasPrice
+	}
+	return globalGasPrice
+}
+
 // init initializes the server with the configured settings
-func (s *TXPoolServer) init(num uint8) {
+func (s *TXPoolServer) init(num uint8, disablePreExec, disableBroadcastNetTx bool) {
 	// Initial txnPool
 	s.txPool = &tc.TXPool{}
 	s.txPool.Init()
@@ -110,6 +175,11 @@ func (s *TXPoolServer) init(num uint8) {
 		s.slots <- struct{}{}
 	}
 
+	s.gasPrice = getGasPriceConfig()
+	log.Infof("tx pool: the current local gas price is %d", s.gasPrice)
+
+	s.disablePreExec = disablePreExec
+	s.disableBroadcastNetTx = disableBroadcastNetTx
 	// Create the given concurrent workers
 	s.workers = make([]txPoolWorker, num)
 	// Initial and start the workers
@@ -160,6 +230,27 @@ func (s *TXPoolServer) getPendingListSize() int {
 	return len(s.allPendingTxs)
 }
 
+// getHeight return current block height
+func (s *TXPoolServer) getHeight() uint32 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.height
+}
+
+// setHeight set current block height
+func (s *TXPoolServer) setHeight(height uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.height = height
+}
+
+// getGasPrice returns the current gas price enforced by the transaction pool
+func (s *TXPoolServer) getGasPrice() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.gasPrice
+}
+
 // removePendingTx removes a transaction from the pending list
 // when it is handled. And if the submitter of the valid transaction
 // is from http, broadcast it to the network. Meanwhile, check if it
@@ -175,11 +266,16 @@ func (s *TXPoolServer) removePendingTx(hash common.Uint256,
 		return
 	}
 
-	if err == errors.ErrNoError && pt.sender == tc.HttpSender {
+	if err == errors.ErrNoError && ((pt.sender == tc.HttpSender) ||
+		(pt.sender == tc.NetSender && !s.disableBroadcastNetTx)) {
 		pid := s.GetPID(tc.NetActor)
 		if pid != nil {
 			pid.Tell(pt.tx)
 		}
+	}
+
+	if pt.sender == tc.HttpSender && pt.ch != nil {
+		replyTxResult(pt.ch, hash, err, err.Error())
 	}
 
 	delete(s.allPendingTxs, hash)
@@ -188,7 +284,7 @@ func (s *TXPoolServer) removePendingTx(hash common.Uint256,
 		select {
 		case s.slots <- struct{}{}:
 		default:
-			log.Debug("slots is full")
+			log.Debug("removePendingTx: slots is full")
 		}
 	}
 
@@ -202,12 +298,12 @@ func (s *TXPoolServer) removePendingTx(hash common.Uint256,
 // setPendingTx adds a transaction to the pending list, if the
 // transaction is already in the pending list, just return false.
 func (s *TXPoolServer) setPendingTx(tx *tx.Transaction,
-	sender tc.SenderType) bool {
+	sender tc.SenderType, txResultCh chan *tc.TxResult) bool {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if ok := s.allPendingTxs[tx.Hash()]; ok != nil {
-		log.Info("Transaction already in the verifying process",
+		log.Debugf("setPendingTx: transaction %x already in the verifying process",
 			tx.Hash())
 		return false
 	}
@@ -215,6 +311,7 @@ func (s *TXPoolServer) setPendingTx(tx *tx.Transaction,
 	pt := &serverPendingTx{
 		tx:     tx,
 		sender: sender,
+		ch:     txResultCh,
 	}
 
 	s.allPendingTxs[tx.Hash()] = pt
@@ -223,14 +320,18 @@ func (s *TXPoolServer) setPendingTx(tx *tx.Transaction,
 
 // assignTxToWorker assigns a new transaction to a worker by LB
 func (s *TXPoolServer) assignTxToWorker(tx *tx.Transaction,
-	sender tc.SenderType) bool {
+	sender tc.SenderType, txResultCh chan *tc.TxResult) bool {
 
 	if tx == nil {
 		return false
 	}
 
-	if ok := s.setPendingTx(tx, sender); !ok {
+	if ok := s.setPendingTx(tx, sender, txResultCh); !ok {
 		s.increaseStats(tc.DuplicateStats)
+		if sender == tc.HttpSender && txResultCh != nil {
+			replyTxResult(txResultCh, tx.Hash(), errors.ErrDuplicateInput,
+				"duplicated transaction input detected")
+		}
 		return false
 	}
 	// Add the rcvTxn to the worker
@@ -314,7 +415,8 @@ func (s *TXPoolServer) unRegisterValidator(checkType types.VerifyType,
 
 	tmpSlice, ok := s.validators.entries[checkType]
 	if !ok {
-		log.Error("No validator on check type:%d\n", checkType)
+		log.Errorf("unRegisterValidator: validator not found with type:%d, id:%s",
+			checkType, id)
 		return
 	}
 
@@ -392,6 +494,8 @@ func (s *TXPoolServer) getTransaction(hash common.Uint256) *tx.Transaction {
 
 // getTxPool returns a tx list for consensus.
 func (s *TXPoolServer) getTxPool(byCount bool, height uint32) []*tc.TXEntry {
+	s.setHeight(height)
+
 	avlTxList, oldTxList := s.txPool.GetTxPool(byCount, height)
 
 	for _, t := range oldTxList {
@@ -400,6 +504,14 @@ func (s *TXPoolServer) getTxPool(byCount bool, height uint32) []*tc.TXEntry {
 	}
 
 	return avlTxList
+}
+
+// getTxCount returns current tx count, including pending and verified
+func (s *TXPoolServer) getTxCount() []uint32 {
+	ret := make([]uint32, 0)
+	ret = append(ret, uint32(s.txPool.GetTransactionCount()))
+	ret = append(ret, uint32(s.getPendingListSize()))
+	return ret
 }
 
 // getPendingTxs returns a currently pending tx list
@@ -414,8 +526,37 @@ func (s *TXPoolServer) getPendingTxs(byCount bool) []*tx.Transaction {
 }
 
 // cleanTransactionList cleans the txs in the block from the ledger
-func (s *TXPoolServer) cleanTransactionList(txs []*tx.Transaction) error {
-	return s.txPool.CleanTransactionList(txs)
+func (s *TXPoolServer) cleanTransactionList(txs []*tx.Transaction, height uint32) {
+	s.txPool.CleanTransactionList(txs)
+
+	// Check whether to update the gas price and remove txs below the
+	// threshold
+	if height%tc.UPDATE_FREQUENCY == 0 {
+		gasPrice := getGasPriceConfig()
+		s.mu.Lock()
+		oldGasPrice := s.gasPrice
+		s.gasPrice = gasPrice
+		s.mu.Unlock()
+		if oldGasPrice != gasPrice {
+			log.Infof("Transaction pool price threshold updated from %d to %d",
+				oldGasPrice, gasPrice)
+		}
+
+		if oldGasPrice < gasPrice {
+			s.txPool.RemoveTxsBelowGasPrice(gasPrice)
+		}
+	}
+	// Cleanup tx pool
+	if !s.disablePreExec {
+		remain := s.txPool.Remain()
+		for _, t := range remain {
+			if ok, _ := preExecCheck(t); !ok {
+				log.Debugf("cleanTransactionList: preExecCheck tx %x failed", t.Hash())
+				continue
+			}
+			s.reVerifyStateful(t, tc.NilSender)
+		}
+	}
 }
 
 // delTransaction deletes a transaction in the tx pool.
@@ -488,7 +629,7 @@ func (s *TXPoolServer) getTransactionCount() int {
 
 // reVerifyStateful re-verify a transaction's stateful data.
 func (s *TXPoolServer) reVerifyStateful(tx *tx.Transaction, sender tc.SenderType) {
-	if ok := s.setPendingTx(tx, sender); !ok {
+	if ok := s.setPendingTx(tx, sender, nil); !ok {
 		s.increaseStats(tc.DuplicateStats)
 		return
 	}
@@ -538,6 +679,7 @@ func (s *TXPoolServer) verifyBlock(req *tc.VerifyBlockReq, sender *actor.PID) {
 		return
 	}
 
+	s.setHeight(req.Height)
 	s.pendingBlock.mu.Lock()
 	defer s.pendingBlock.mu.Unlock()
 
@@ -546,10 +688,39 @@ func (s *TXPoolServer) verifyBlock(req *tc.VerifyBlockReq, sender *actor.PID) {
 	s.pendingBlock.processedTxs = make(map[common.Uint256]*tc.VerifyTxResult, len(req.Txs))
 	s.pendingBlock.unProcessedTxs = make(map[common.Uint256]*tx.Transaction, 0)
 
+	txs := make(map[common.Uint256]bool, len(req.Txs))
+
+	// Check whether a tx's gas price is lower than the required, if yes,
+	// just return error
+	for _, t := range req.Txs {
+		if t.GasPrice < s.gasPrice {
+			entry := &tc.VerifyTxResult{
+				Height:  s.pendingBlock.height,
+				Tx:      t,
+				ErrCode: errors.ErrGasPrice,
+			}
+			s.pendingBlock.processedTxs[t.Hash()] = entry
+			s.sendBlkResult2Consensus()
+			return
+		}
+		// Check whether double spent
+		if _, ok := txs[t.Hash()]; ok {
+			entry := &tc.VerifyTxResult{
+				Height:  s.pendingBlock.height,
+				Tx:      t,
+				ErrCode: errors.ErrDoubleSpend,
+			}
+			s.pendingBlock.processedTxs[t.Hash()] = entry
+			s.sendBlkResult2Consensus()
+			return
+		}
+		txs[t.Hash()] = true
+	}
+
 	checkBlkResult := s.txPool.GetUnverifiedTxs(req.Txs, req.Height)
 
 	for _, t := range checkBlkResult.UnverifiedTxs {
-		s.assignTxToWorker(t, tc.NilSender)
+		s.assignTxToWorker(t, tc.NilSender, nil)
 		s.pendingBlock.unProcessedTxs[t.Hash()] = t
 	}
 

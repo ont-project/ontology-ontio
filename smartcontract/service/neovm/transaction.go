@@ -19,36 +19,32 @@
 package neovm
 
 import (
-	vm "github.com/ontio/ontology/vm/neovm"
 	"github.com/ontio/ontology/core/types"
+	vm "github.com/ontio/ontology/vm/neovm"
 	vmtypes "github.com/ontio/ontology/vm/neovm/types"
 )
 
 // GetExecutingAddress push transaction's hash to vm stack
 func TransactionGetHash(service *NeoVmService, engine *vm.ExecutionEngine) error {
-	txn := vm.PopInteropInterface(engine).(*types.Transaction)
-	txHash := txn.Hash()
+	txn, _ := vm.PopInteropInterface(engine)
+	tx := txn.(*types.Transaction)
+	txHash := tx.Hash()
 	vm.PushData(engine, txHash.ToArray())
 	return nil
 }
 
 // TransactionGetType push transaction's type to vm stack
 func TransactionGetType(service *NeoVmService, engine *vm.ExecutionEngine) error {
-	txn := vm.PopInteropInterface(engine).(*types.Transaction)
-	vm.PushData(engine, int(txn.TxType))
+	txn, _ := vm.PopInteropInterface(engine)
+	tx := txn.(*types.Transaction)
+	vm.PushData(engine, int(tx.TxType))
 	return nil
 }
 
 // TransactionGetAttributes push transaction's attributes to vm stack
 func TransactionGetAttributes(service *NeoVmService, engine *vm.ExecutionEngine) error {
-	txn := vm.PopInteropInterface(engine).(*types.Transaction)
-	attributes := txn.Attributes
+	vm.PopInteropInterface(engine)
 	attributList := make([]vmtypes.StackItems, 0)
-	for _, v := range attributes {
-		attributList = append(attributList, vmtypes.NewInteropInterface(v))
-	}
 	vm.PushData(engine, attributList)
 	return nil
 }
-
-

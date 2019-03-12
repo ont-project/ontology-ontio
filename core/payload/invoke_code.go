@@ -23,38 +23,45 @@ import (
 	"io"
 
 	"github.com/ontio/ontology/common"
-	stypes "github.com/ontio/ontology/smartcontract/types"
+	"github.com/ontio/ontology/common/serialization"
 )
 
 // InvokeCode is an implementation of transaction payload for invoke smartcontract
 type InvokeCode struct {
-	GasLimit common.Fixed64
-	Code     stypes.VmCode
+	Code []byte
 }
 
 func (self *InvokeCode) Serialize(w io.Writer) error {
-	var err error
-	err = self.GasLimit.Serialize(w)
-	if err != nil {
-		return fmt.Errorf("InvokeCode GasLimit Serialize failed: %s", err)
-	}
-	err = self.Code.Serialize(w)
-	if err != nil {
+	if err := serialization.WriteVarBytes(w, self.Code); err != nil {
 		return fmt.Errorf("InvokeCode Code Serialize failed: %s", err)
 	}
-	return err
+	return nil
 }
 
 func (self *InvokeCode) Deserialize(r io.Reader) error {
-	var err error
-
-	err = self.GasLimit.Deserialize(r)
-	if err != nil {
-		return fmt.Errorf("InvokeCode GasLimit Deserialize failed: %s", err)
-	}
-	err = self.Code.Deserialize(r)
+	code, err := serialization.ReadVarBytes(r)
 	if err != nil {
 		return fmt.Errorf("InvokeCode Code Deserialize failed: %s", err)
 	}
+	self.Code = code
+	return nil
+}
+
+//note: InvokeCode.Code has data reference of param source
+func (self *InvokeCode) Deserialization(source *common.ZeroCopySource) error {
+	code, _, irregular, eof := source.NextVarBytes()
+	if eof {
+		return io.ErrUnexpectedEOF
+	}
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	self.Code = code
+	return nil
+}
+
+func (self *InvokeCode) Serialization(sink *common.ZeroCopySink) error {
+	sink.WriteVarBytes(self.Code)
 	return nil
 }

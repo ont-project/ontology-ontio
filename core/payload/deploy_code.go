@@ -23,25 +23,34 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ontio/ontology/common"
 	"github.com/ontio/ontology/common/serialization"
-	stypes "github.com/ontio/ontology/smartcontract/types"
 )
 
 // DeployCode is an implementation of transaction payload for deploy smartcontract
 type DeployCode struct {
-	Code        stypes.VmCode
+	Code        []byte
 	NeedStorage bool
 	Name        string
 	Version     string
 	Author      string
 	Email       string
 	Description string
+
+	address common.Address
+}
+
+func (dc *DeployCode) Address() common.Address {
+	if dc.address == common.ADDRESS_EMPTY {
+		dc.address = common.AddressFromVmCode(dc.Code)
+	}
+	return dc.address
 }
 
 func (dc *DeployCode) Serialize(w io.Writer) error {
 	var err error
 
-	err = dc.Code.Serialize(w)
+	err = serialization.WriteVarBytes(w, dc.Code)
 	if err != nil {
 		return fmt.Errorf("DeployCode Code Serialize failed: %s", err)
 	}
@@ -80,10 +89,11 @@ func (dc *DeployCode) Serialize(w io.Writer) error {
 }
 
 func (dc *DeployCode) Deserialize(r io.Reader) error {
-	err := dc.Code.Deserialize(r)
+	code, err := serialization.ReadVarBytes(r)
 	if err != nil {
 		return fmt.Errorf("DeployCode Code Deserialize failed: %s", err)
 	}
+	dc.Code = code
 
 	dc.NeedStorage, err = serialization.ReadBool(r)
 	if err != nil {
@@ -122,4 +132,61 @@ func (dc *DeployCode) ToArray() []byte {
 	b := new(bytes.Buffer)
 	dc.Serialize(b)
 	return b.Bytes()
+}
+
+func (dc *DeployCode) Serialization(sink *common.ZeroCopySink) error {
+	sink.WriteVarBytes(dc.Code)
+	sink.WriteBool(dc.NeedStorage)
+	sink.WriteString(dc.Name)
+	sink.WriteString(dc.Version)
+	sink.WriteString(dc.Author)
+	sink.WriteString(dc.Email)
+	sink.WriteString(dc.Description)
+
+	return nil
+}
+
+//note: DeployCode.Code has data reference of param source
+func (dc *DeployCode) Deserialization(source *common.ZeroCopySource) error {
+	var eof, irregular bool
+	dc.Code, _, irregular, eof = source.NextVarBytes()
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	dc.NeedStorage, irregular, eof = source.NextBool()
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	dc.Name, _, irregular, eof = source.NextString()
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	dc.Version, _, irregular, eof = source.NextString()
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	dc.Author, _, irregular, eof = source.NextString()
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	dc.Email, _, irregular, eof = source.NextString()
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	dc.Description, _, irregular, eof = source.NextString()
+	if irregular {
+		return common.ErrIrregularData
+	}
+
+	if eof {
+		return io.ErrUnexpectedEOF
+	}
+
+	return nil
 }

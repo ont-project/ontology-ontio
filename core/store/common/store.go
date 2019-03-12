@@ -19,21 +19,25 @@
 package common
 
 import (
+	"errors"
 	"github.com/ontio/ontology/common"
 	"github.com/ontio/ontology/core/states"
 	"github.com/ontio/ontology/smartcontract/event"
 )
 
+var ErrNotFound = errors.New("not found")
+
 //Store iterator for iterate store
 type StoreIterator interface {
-	Next() bool           //Next item. If item available return true, otherwise return false
-	Prev() bool           //previous item. If item available return true, otherwise return false
-	First() bool          //First item. If item available return true, otherwise return false
-	Last() bool           //Last item. If item available return true, otherwise return false
-	Seek(key []byte) bool //Seek key. If item available return true, otherwise return false
-	Key() []byte          //Return the current item key
-	Value() []byte        //Return the current item value
-	Release()             //Close iterator
+	Next() bool //Next item. If item available return true, otherwise return false
+	//Prev() bool           //previous item. If item available return true, otherwise return false
+	First() bool //First item. If item available return true, otherwise return false
+	//Last() bool           //Last item. If item available return true, otherwise return false
+	//Seek(key []byte) bool //Seek key. If item available return true, otherwise return false
+	Key() []byte   //Return the current item key
+	Value() []byte //Return the current item value
+	Release()      //Close iterator
+	Error() error  // Error returns any accumulated error.
 }
 
 //PersistStore of ledger
@@ -81,11 +85,11 @@ type MemoryCacheStore interface {
 //EventStore save event notify
 type EventStore interface {
 	//SaveEventNotifyByTx save event notify gen by smart contract execution
-	SaveEventNotifyByTx(txHash common.Uint256, notifies []*event.NotifyEventInfo) error
+	SaveEventNotifyByTx(txHash common.Uint256, notify *event.ExecuteNotify) error
 	//Save transaction hashes which have event notify gen
 	SaveEventNotifyByBlock(height uint32, txHashs []common.Uint256) error
 	//GetEventNotifyByTx return event notify by transaction hash
-	GetEventNotifyByTx(txHash common.Uint256) ([]*event.NotifyEventInfo, error)
+	GetEventNotifyByTx(txHash common.Uint256) (*event.ExecuteNotify, error)
 	//Commit event notify to store
 	CommitTo() error
 }

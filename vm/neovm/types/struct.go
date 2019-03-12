@@ -19,9 +19,16 @@
 package types
 
 import (
+	"fmt"
 	"math/big"
+	"reflect"
 
 	"github.com/ontio/ontology/vm/neovm/interfaces"
+)
+
+const (
+	MAX_STRUCT_DEPTH = 10
+	MAX_CLONE_LENGTH = 1024
 )
 
 type Struct struct {
@@ -35,68 +42,108 @@ func NewStruct(value []StackItems) *Struct {
 }
 
 func (this *Struct) Equals(other StackItems) bool {
-	if _, ok := other.(*Struct); !ok {
+
+	if this == other {
+		return true
+	}
+
+	oa, err := other.GetStruct()
+	if err != nil {
 		return false
 	}
-	a1 := this._array
-	a2 := other.GetStruct()
-	l1 := len(a1)
-	l2 := len(a2)
-	if l1 != l2 {
-		return false
+
+	return reflect.DeepEqual(this._array, oa)
+}
+
+func (this *Struct) GetBigInteger() (*big.Int, error) {
+	return nil, fmt.Errorf("%s", "Not support struct to integer")
+}
+
+func (this *Struct) GetBoolean() (bool, error) {
+	return true, nil
+}
+
+func (this *Struct) GetByteArray() ([]byte, error) {
+	return nil, fmt.Errorf("%s", "Not support struct to byte array")
+}
+
+func (this *Struct) GetInterface() (interfaces.Interop, error) {
+	return nil, fmt.Errorf("%s", "Not support struct to interface")
+}
+
+func (s *Struct) GetArray() ([]StackItems, error) {
+	return s._array, nil
+}
+
+func (s *Struct) GetStruct() ([]StackItems, error) {
+	return s._array, nil
+}
+
+func (s *Struct) Clone() (StackItems, error) {
+	var i int
+	return clone(s, &i)
+}
+
+func clone(s *Struct, length *int) (StackItems, error) {
+	if *length > MAX_CLONE_LENGTH {
+		return nil, fmt.Errorf("%s", "over max struct clone length")
 	}
-	for i := 0; i < l1; i++ {
-		if !a1[i].Equals(a2[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-func (this *Struct) GetBigInteger() *big.Int {
-	if len(this._array) == 0 {
-		return big.NewInt(0)
-	}
-	return this._array[0].GetBigInteger()
-}
-
-func (this *Struct) GetBoolean() bool {
-	if len(this._array) == 0 {
-		return false
-	}
-	return this._array[0].GetBoolean()
-}
-
-func (this *Struct) GetByteArray() []byte {
-	if len(this._array) == 0 {
-		return []byte{}
-	}
-	return this._array[0].GetByteArray()
-}
-
-func (this *Struct) GetInterface() interfaces.Interop {
-	if len(this._array) == 0 {
-		return nil
-	}
-	return this._array[0].GetInterface()
-}
-
-func (s *Struct) GetArray() []StackItems {
-	return s._array
-}
-
-func (s *Struct) GetStruct() []StackItems {
-	return s._array
-}
-
-func (s *Struct) Clone() StackItems {
 	var arr []StackItems
 	for _, v := range s._array {
+		*length++
 		if value, ok := v.(*Struct); ok {
-			arr = append(arr, value.Clone())
+			vc, err := clone(value, length)
+			if err != nil {
+				return nil, err
+			}
+			arr = append(arr, vc)
 		} else {
 			arr = append(arr, v)
 		}
 	}
-	return &Struct{arr}
+	return &Struct{arr}, nil
+}
+
+func checkStructRef(item StackItems, visited map[uintptr]bool, depth int) bool {
+	if depth > MAX_STRUCT_DEPTH {
+		return true
+	}
+	switch item.(type) {
+	case *Struct:
+		p := reflect.ValueOf(item).Pointer()
+		if visited[p] {
+			return true
+		}
+		visited[p] = true
+		st, _ := item.GetStruct()
+		for _, v := range st {
+			if checkStructRef(v, visited, depth+1) {
+				return true
+			}
+		}
+		delete(visited, p)
+		return false
+	default:
+		return false
+	}
+}
+
+func (this *Struct) GetMap() (map[StackItems]StackItems, error) {
+	return nil, fmt.Errorf("%s", "Not support struct to map")
+}
+
+func (this *Struct) Add(item StackItems) {
+	this._array = append(this._array, item)
+}
+
+func (this *Struct) RemoveAt(index int) {
+	this._array = append(this._array[:index-1], this._array[index:]...)
+}
+
+func (this *Struct) Count() int {
+	return len(this._array)
+}
+
+func (this *Struct) IsMapKey() bool {
+	return false
 }

@@ -125,6 +125,28 @@ func (self *CompactMerkleTree) GetRootWithNewLeaf(newLeaf common.Uint256) common
 	return root
 }
 
+// clone except internal hash storage
+func (self *CompactMerkleTree) cloneMem() CompactMerkleTree {
+	temp := CompactMerkleTree{mintree_h: self.mintree_h, hasher: self.hasher, hashStore: nil,
+		rootHash: self.rootHash, treeSize: self.treeSize,
+	}
+	temp.hashes = make([]common.Uint256, len(self.hashes))
+	for i, h := range self.hashes {
+		temp.hashes[i] = h
+	}
+
+	return temp
+}
+
+func (self *CompactMerkleTree) GetRootWithNewLeaves(newLeaf []common.Uint256) common.Uint256 {
+	tree := self.cloneMem()
+	for _, h := range newLeaf {
+		tree.AppendHash(h)
+	}
+
+	return tree.Root()
+}
+
 // Append appends a leaf to the merkle tree and returns the audit path
 func (self *CompactMerkleTree) Append(leafv []byte) []common.Uint256 {
 	leaf := self.hasher.hash_leaf(leafv)
@@ -275,7 +297,7 @@ func (self *CompactMerkleTree) subproof(m, n uint32, b bool) []common.Uint256 {
 // m zero based index, n size 1-based
 func (self *CompactMerkleTree) InclusionProof(m, n uint32) ([]common.Uint256, error) {
 	if m >= n {
-		return nil, errors.New("wrong paramaters")
+		return nil, errors.New("wrong parameters")
 	} else if self.treeSize < n {
 		return nil, errors.New("not available yet")
 	} else if self.hashStore == nil {

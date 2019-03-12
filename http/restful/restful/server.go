@@ -16,12 +16,18 @@
  * along with The ontology.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Package restful privides restful server router and handler
 package restful
 
 import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	cfg "github.com/ontio/ontology/common/config"
+	"github.com/ontio/ontology/common/log"
+	berr "github.com/ontio/ontology/http/base/error"
+	"github.com/ontio/ontology/http/base/rest"
+	"golang.org/x/net/netutil"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -29,10 +35,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	cfg "github.com/ontio/ontology/common/config"
-	"github.com/ontio/ontology/common/log"
-	berr "github.com/ontio/ontology/http/base/error"
-	"github.com/ontio/ontology/http/base/rest"
 )
 
 type handler func(map[string]interface{}) map[string]interface{}
@@ -45,12 +47,11 @@ type restServer struct {
 	router   *Router
 	listener net.Listener
 	server   *http.Server
-	postMap  map[string]Action
-	getMap   map[string]Action
+	postMap  map[string]Action //post method map
+	getMap   map[string]Action //get method map
 }
 
 const (
-	GET_GEN_BLK_TIME      = "/api/v1/node/generateblocktime"
 	GET_CONN_COUNT        = "/api/v1/node/connectioncount"
 	GET_BLK_TXS_BY_HEIGHT = "/api/v1/block/transactions/height/:height"
 	GET_BLK_BY_HEIGHT     = "/api/v1/block/details/height/:height"
@@ -65,10 +66,19 @@ const (
 	GET_SMTCOCE_EVTS      = "/api/v1/smartcode/event/txhash/:hash"
 	GET_BLK_HGT_BY_TXHASH = "/api/v1/block/height/txhash/:hash"
 	GET_MERKLE_PROOF      = "/api/v1/merkleproof/:hash"
+	GET_GAS_PRICE         = "/api/v1/gasprice"
+	GET_ALLOWANCE         = "/api/v1/allowance/:asset/:from/:to"
+	GET_UNBOUNDONG        = "/api/v1/unboundong/:addr"
+	GET_GRANTONG          = "/api/v1/grantong/:addr"
+	GET_MEMPOOL_TXCOUNT   = "/api/v1/mempool/txcount"
+	GET_MEMPOOL_TXSTATE   = "/api/v1/mempool/txstate/:hash"
+	GET_VERSION           = "/api/v1/version"
+	GET_NETWORKID         = "/api/v1/networkid"
 
 	POST_RAW_TX = "/api/v1/transaction"
 )
 
+//init restful server
 func InitRestServer() rest.ApiServer {
 	rt := &restServer{}
 
@@ -79,14 +89,16 @@ func InitRestServer() rest.ApiServer {
 	return rt
 }
 
+//start server
 func (this *restServer) Start() error {
-	if cfg.Parameters.HttpRestPort == 0 {
+	retPort := int(cfg.DefConfig.Restful.HttpRestPort)
+	if retPort == 0 {
 		log.Fatal("Not configure HttpRestPort port ")
 		return nil
 	}
 
 	tlsFlag := false
-	if tlsFlag || cfg.Parameters.HttpRestPort%1000 == rest.TLS_PORT {
+	if tlsFlag || retPort%1000 == rest.TLS_PORT {
 		var err error
 		this.listener, err = this.initTlsListen()
 		if err != nil {
@@ -95,13 +107,17 @@ func (this *restServer) Start() error {
 		}
 	} else {
 		var err error
-		this.listener, err = net.Listen("tcp", ":"+strconv.Itoa(cfg.Parameters.HttpRestPort))
+		this.listener, err = net.Listen("tcp", ":"+strconv.Itoa(retPort))
 		if err != nil {
 			log.Fatal("net.Listen: ", err.Error())
 			return err
 		}
 	}
 	this.server = &http.Server{Handler: this.router}
+	//set LimitListener number
+	if cfg.DefConfig.Restful.HttpMaxConnections > 0 {
+		this.listener = netutil.LimitListener(this.listener, int(cfg.DefConfig.Restful.HttpMaxConnections))
+	}
 	err := this.server.Serve(this.listener)
 
 	if err != nil {
@@ -112,10 +128,10 @@ func (this *restServer) Start() error {
 	return nil
 }
 
+//resigtry handler method
 func (this *restServer) registryMethod() {
 
 	getMethodMap := map[string]Action{
-		GET_GEN_BLK_TIME:      {name: "getgenerateblocktime", handler: rest.GetGenerateBlockTime},
 		GET_CONN_COUNT:        {name: "getconnectioncount", handler: rest.GetConnectionCount},
 		GET_BLK_TXS_BY_HEIGHT: {name: "getblocktxsbyheight", handler: rest.GetBlockTxsByHeight},
 		GET_BLK_BY_HEIGHT:     {name: "getblockbyheight", handler: rest.GetBlockByHeight},
@@ -129,11 +145,19 @@ func (this *restServer) registryMethod() {
 		GET_BLK_HGT_BY_TXHASH: {name: "getblockheightbytxhash", handler: rest.GetBlockHeightByTxHash},
 		GET_STORAGE:           {name: "getstorage", handler: rest.GetStorage},
 		GET_BALANCE:           {name: "getbalance", handler: rest.GetBalance},
-		GET_MERKLE_PROOF:     {name: "getmerkleproof", handler: rest.GetMerkleProof},
+		GET_ALLOWANCE:         {name: "getallowance", handler: rest.GetAllowance},
+		GET_MERKLE_PROOF:      {name: "getmerkleproof", handler: rest.GetMerkleProof},
+		GET_GAS_PRICE:         {name: "getgasprice", handler: rest.GetGasPrice},
+		GET_UNBOUNDONG:        {name: "getunboundong", handler: rest.GetUnboundOng},
+		GET_GRANTONG:          {name: "getgrantong", handler: rest.GetGrantOng},
+		GET_MEMPOOL_TXCOUNT:   {name: "getmempooltxcount", handler: rest.GetMemPoolTxCount},
+		GET_MEMPOOL_TXSTATE:   {name: "getmempooltxstate", handler: rest.GetMemPoolTxState},
+		GET_VERSION:           {name: "getversion", handler: rest.GetNodeVersion},
+		GET_NETWORKID:         {name: "getnetworkid", handler: rest.GetNetworkId},
 	}
 
 	postMethodMap := map[string]Action{
-		POST_RAW_TX:          {name: "sendrawtransaction", handler: rest.SendRawTransaction},
+		POST_RAW_TX: {name: "sendrawtransaction", handler: rest.SendRawTransaction},
 	}
 	this.postMap = postMethodMap
 	this.getMap = getMethodMap
@@ -164,12 +188,21 @@ func (this *restServer) getPath(url string) string {
 		return GET_BALANCE
 	} else if strings.Contains(url, strings.TrimRight(GET_MERKLE_PROOF, ":hash")) {
 		return GET_MERKLE_PROOF
+	} else if strings.Contains(url, strings.TrimRight(GET_ALLOWANCE, ":asset/:from/:to")) {
+		return GET_ALLOWANCE
+	} else if strings.Contains(url, strings.TrimRight(GET_UNBOUNDONG, ":addr")) {
+		return GET_UNBOUNDONG
+	} else if strings.Contains(url, strings.TrimRight(GET_GRANTONG, ":addr")) {
+		return GET_GRANTONG
+	} else if strings.Contains(url, strings.TrimRight(GET_MEMPOOL_TXSTATE, ":hash")) {
+		return GET_MEMPOOL_TXSTATE
 	}
 	return url
 }
+
+//get request params
 func (this *restServer) getParams(r *http.Request, url string, req map[string]interface{}) map[string]interface{} {
 	switch url {
-	case GET_GEN_BLK_TIME:
 	case GET_CONN_COUNT:
 	case GET_BLK_TXS_BY_HEIGHT:
 		req["Height"] = getParam(r, "height")
@@ -185,11 +218,6 @@ func (this *restServer) getParams(r *http.Request, url string, req map[string]in
 	case GET_CONTRACT_STATE:
 		req["Hash"], req["Raw"] = getParam(r, "hash"), r.FormValue("raw")
 	case POST_RAW_TX:
-		userid := r.FormValue("userid")
-		req["Userid"] = userid
-		if len(userid) == 0 {
-			req["Userid"] = getParam(r, "userid")
-		}
 		req["PreExec"] = r.FormValue("preExec")
 	case GET_STORAGE:
 		req["Hash"], req["Key"] = getParam(r, "hash"), getParam(r, "key")
@@ -203,10 +231,21 @@ func (this *restServer) getParams(r *http.Request, url string, req map[string]in
 		req["Addr"] = getParam(r, "addr")
 	case GET_MERKLE_PROOF:
 		req["Hash"] = getParam(r, "hash")
+	case GET_ALLOWANCE:
+		req["Asset"] = getParam(r, "asset")
+		req["From"], req["To"] = getParam(r, "from"), getParam(r, "to")
+	case GET_UNBOUNDONG:
+		req["Addr"] = getParam(r, "addr")
+	case GET_GRANTONG:
+		req["Addr"] = getParam(r, "addr")
+	case GET_MEMPOOL_TXSTATE:
+		req["Hash"] = getParam(r, "hash")
 	default:
 	}
 	return req
 }
+
+//init get handler
 func (this *restServer) initGetHandler() {
 
 	for k, _ := range this.getMap {
@@ -227,6 +266,8 @@ func (this *restServer) initGetHandler() {
 		})
 	}
 }
+
+//init post handler
 func (this *restServer) initPostHandler() {
 	for k, _ := range this.postMap {
 		this.router.Post(k, func(w http.ResponseWriter, r *http.Request) {
@@ -267,6 +308,8 @@ func (this *restServer) write(w http.ResponseWriter, data []byte) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Write(data)
 }
+
+//response
 func (this *restServer) response(w http.ResponseWriter, resp map[string]interface{}) {
 	resp["Desc"] = berr.ErrMap[resp["Error"].(int64)]
 	data, err := json.Marshal(resp)
@@ -276,12 +319,16 @@ func (this *restServer) response(w http.ResponseWriter, resp map[string]interfac
 	}
 	this.write(w, data)
 }
+
+//stop restful server
 func (this *restServer) Stop() {
 	if this.server != nil {
 		this.server.Shutdown(context.Background())
 		log.Error("Close restful ")
 	}
 }
+
+//restart server
 func (this *restServer) Restart(cmd map[string]interface{}) map[string]interface{} {
 	go func() {
 		time.Sleep(time.Second)
@@ -293,10 +340,12 @@ func (this *restServer) Restart(cmd map[string]interface{}) map[string]interface
 	var resp = rest.ResponsePack(berr.SUCCESS)
 	return resp
 }
+
+//init tls
 func (this *restServer) initTlsListen() (net.Listener, error) {
 
-	certPath := cfg.Parameters.HttpCertPath
-	keyPath := cfg.Parameters.HttpKeyPath
+	certPath := cfg.DefConfig.Restful.HttpCertPath
+	keyPath := cfg.DefConfig.Restful.HttpKeyPath
 
 	// load cert
 	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
@@ -309,8 +358,9 @@ func (this *restServer) initTlsListen() (net.Listener, error) {
 		Certificates: []tls.Certificate{cert},
 	}
 
-	log.Info("TLS listen port is ", strconv.Itoa(cfg.Parameters.HttpRestPort))
-	listener, err := tls.Listen("tcp", ":"+strconv.Itoa(cfg.Parameters.HttpRestPort), tlsConfig)
+	restPort := strconv.Itoa(int(cfg.DefConfig.Restful.HttpRestPort))
+	log.Info("TLS listen port is ", restPort)
+	listener, err := tls.Listen("tcp", ":"+restPort, tlsConfig)
 	if err != nil {
 		log.Error(err)
 		return nil, err

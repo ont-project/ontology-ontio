@@ -19,10 +19,10 @@
 package neovm
 
 import (
-	vm "github.com/ontio/ontology/vm/neovm"
-	"github.com/ontio/ontology/errors"
-	"github.com/ontio/ontology/core/types"
 	"github.com/ontio/ontology/common"
+	"github.com/ontio/ontology/core/types"
+	"github.com/ontio/ontology/errors"
+	vm "github.com/ontio/ontology/vm/neovm"
 	vmtypes "github.com/ontio/ontology/vm/neovm/types"
 )
 
@@ -34,14 +34,18 @@ func BlockChainGetHeight(service *NeoVmService, engine *vm.ExecutionEngine) erro
 
 // BlockChainGetHeader put blockchain's header to vm stack
 func BlockChainGetHeader(service *NeoVmService, engine *vm.ExecutionEngine) error {
-	data := vm.PopByteArray(engine)
 	var (
 		header *types.Header
-		err error
+		err    error
 	)
+	data, err := vm.PopByteArray(engine)
+	if err != nil {
+		return err
+	}
+
 	l := len(data)
 	if l <= 5 {
-		b := vmtypes.ConvertBytesToBigInteger(data)
+		b := vmtypes.BigIntFromBytes(data)
 		height := uint32(b.Int64())
 		hash := service.Store.GetBlockHash(height)
 		header, err = service.Store.GetHeaderByHash(hash)
@@ -66,11 +70,15 @@ func BlockChainGetBlock(service *NeoVmService, engine *vm.ExecutionEngine) error
 	if vm.EvaluationStackCount(engine) < 1 {
 		return errors.NewErr("[BlockChainGetBlock] Too few input parameters ")
 	}
-	data := vm.PopByteArray(engine)
+	data, err := vm.PopByteArray(engine)
+	if err != nil {
+		return err
+	}
+
 	var block *types.Block
 	l := len(data)
 	if l <= 5 {
-		b := vmtypes.ConvertBytesToBigInteger(data)
+		b := vmtypes.BigIntFromBytes(data)
 		height := uint32(b.Int64())
 		var err error
 		block, err = service.Store.GetBlockByHeight(height)
@@ -95,11 +103,16 @@ func BlockChainGetBlock(service *NeoVmService, engine *vm.ExecutionEngine) error
 
 // BlockChainGetTransaction put blockchain's transaction to vm stack
 func BlockChainGetTransaction(service *NeoVmService, engine *vm.ExecutionEngine) error {
-	d := vm.PopByteArray(engine)
-	hash, err := common.Uint256ParseFromBytes(d); if err != nil {
+	d, err := vm.PopByteArray(engine)
+	if err != nil {
 		return err
 	}
-	t, _, err := service.Store.GetTransaction(hash); if err != nil {
+	hash, err := common.Uint256ParseFromBytes(d)
+	if err != nil {
+		return err
+	}
+	t, _, err := service.Store.GetTransaction(hash)
+	if err != nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[BlockChainGetTransaction] GetTransaction error!")
 	}
 	vm.PushData(engine, t)
@@ -111,14 +124,39 @@ func BlockChainGetContract(service *NeoVmService, engine *vm.ExecutionEngine) er
 	if vm.EvaluationStackCount(engine) < 1 {
 		return errors.NewErr("[GetContract] Too few input parameters ")
 	}
-	address, err := common.AddressParseFromBytes(vm.PopByteArray(engine)); if err != nil {
+	b, err := vm.PopByteArray(engine)
+	if err != nil {
 		return err
 	}
-	item, err := service.Store.GetContractState(address); if err != nil {
+	address, err := common.AddressParseFromBytes(b)
+	if err != nil {
+		return err
+	}
+	item, err := service.Store.GetContractState(address)
+	if err != nil {
 		return errors.NewDetailErr(err, errors.ErrNoCode, "[GetContract] GetAsset error!")
 	}
 	vm.PushData(engine, item)
 	return nil
 }
 
-
+// BlockChainGetTransactionHeight put transaction in block height to vm stack
+func BlockChainGetTransactionHeight(service *NeoVmService, engine *vm.ExecutionEngine) error {
+	if vm.EvaluationStackCount(engine) < 1 {
+		return errors.NewErr("[BlockChainGetTransactionHeight] Too few input parameters ")
+	}
+	d, err := vm.PopByteArray(engine)
+	if err != nil {
+		return err
+	}
+	hash, err := common.Uint256ParseFromBytes(d)
+	if err != nil {
+		return err
+	}
+	_, h, err := service.Store.GetTransaction(hash)
+	if err != nil {
+		return errors.NewDetailErr(err, errors.ErrNoCode, "[BlockChainGetTransaction] GetTransaction error!")
+	}
+	vm.PushData(engine, h)
+	return nil
+}

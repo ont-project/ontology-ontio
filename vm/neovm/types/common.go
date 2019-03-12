@@ -29,12 +29,11 @@ func bytesReverse(u []byte) []byte {
 	return u
 }
 
-func ConvertBigIntegerToBytes(data *big.Int) []byte {
-	if data.Int64() == 0 {
+func BigIntToBytes(data *big.Int) []byte {
+	bs := data.Bytes()
+	if len(bs) == 0 {
 		return []byte{}
 	}
-
-	bs := data.Bytes()
 	b := bs[0]
 	if data.Sign() < 0 {
 		for i, b := range bs {
@@ -58,7 +57,7 @@ func ConvertBigIntegerToBytes(data *big.Int) []byte {
 	return bs
 }
 
-func ConvertBytesToBigInteger(ba []byte) *big.Int {
+func BigIntFromBytes(ba []byte) *big.Int {
 	res := big.NewInt(0)
 	l := len(ba)
 	if l == 0 {
